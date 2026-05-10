@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentAction
 import com.aasa.eldercare.data.entity.ConversationEntity
+import com.aasa.eldercare.ui.IntentActionLauncher
 import com.google.gson.GsonBuilder
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -153,6 +154,20 @@ fun HomeScreen(
                 ErrorCard(message = error, onDismiss = viewModel::clearError)
             }
 
+            PendingActionSection(
+                uiState = uiState,
+                onCallContact = { number ->
+                    IntentActionLauncher.openDialer(context, number)
+                },
+                onOpenSms = { number, body ->
+                    IntentActionLauncher.openSms(context, number, body)
+                },
+                onOpenEmergencyDialer = { number ->
+                    IntentActionLauncher.openDialer(context, number)
+                },
+                onDismiss = viewModel::dismissPendingAction
+            )
+
             if (uiState.toolExecutionSuccess != null) {
                 ToolExecutionCard(
                     success = uiState.toolExecutionSuccess == true,
@@ -187,6 +202,65 @@ fun HomeScreen(
 private fun aasaHomeViewModel(): HomeViewModel {
     val application = LocalContext.current.applicationContext as AasaApplication
     return viewModel(factory = HomeViewModel.Factory(application))
+}
+
+// ---------------------------------------------------------------------
+// Phase 7 deferred-confirmation action cards
+// ---------------------------------------------------------------------
+
+@Composable
+private fun PendingActionSection(
+    uiState: HomeUiState,
+    onCallContact: (String) -> Unit,
+    onOpenSms: (String, String) -> Unit,
+    onOpenEmergencyDialer: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    when {
+        uiState.showContactActionCard -> {
+            ContactActionCard(
+                contactName = uiState.pendingContactName,
+                phoneNumber = uiState.pendingPhoneNumber,
+                onOpenDialer = {
+                    uiState.pendingPhoneNumber?.let(onCallContact)
+                    onDismiss()
+                },
+                onDismiss = onDismiss
+            )
+        }
+        uiState.showSafetyActionCard -> {
+            val number = uiState.pendingPhoneNumber
+            SafetyActionCard(
+                contactName = uiState.pendingContactName,
+                alertMessage = uiState.pendingAlertMessage,
+                onOpenSms = {
+                    if (!number.isNullOrBlank()) {
+                        onOpenSms(number, uiState.pendingAlertMessage.orEmpty())
+                    }
+                    onDismiss()
+                },
+                onDismiss = onDismiss
+            )
+        }
+        uiState.showEmergencyActionCard -> {
+            EmergencyActionCard(
+                contactName = uiState.pendingContactName,
+                contactPhoneNumber = uiState.pendingPhoneNumber,
+                emergencyNumber = uiState.pendingEmergencyNumber,
+                alertMessage = uiState.pendingAlertMessage,
+                onOpenEmergencyDialer = {
+                    val number = uiState.pendingEmergencyNumber ?: "911"
+                    onOpenEmergencyDialer(number)
+                    onDismiss()
+                },
+                onCallContact = {
+                    uiState.pendingPhoneNumber?.let(onCallContact)
+                    onDismiss()
+                },
+                onDismiss = onDismiss
+            )
+        }
+    }
 }
 
 // ---------------------------------------------------------------------

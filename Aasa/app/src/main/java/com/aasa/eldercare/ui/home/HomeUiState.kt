@@ -1,6 +1,7 @@
 package com.aasa.eldercare.ui.home
 
 import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.tools.ToolActionTypes
 
 /**
  * Single source of truth for the Home / chat screen.
@@ -39,5 +40,29 @@ data class HomeUiState(
     val recognizedSpeech: String? = null,
     val voiceError: String? = null,
     val ttsStatus: String? = null,
-    val hasMicPermission: Boolean = false
-)
+    val hasMicPermission: Boolean = false,
+
+    /**
+     * Phase 7 deferred-confirmation action payload. Populated from the
+     * latest tool result whenever the tool returned an `actionType`
+     * recognized by [com.aasa.eldercare.tools.ToolActionTypes]. The UI
+     * uses these fields to render contact / safety / emergency action
+     * cards.
+     */
+    val pendingActionType: String? = null,
+    val pendingContactName: String? = null,
+    val pendingPhoneNumber: String? = null,
+    val pendingAlertMessage: String? = null,
+    val pendingEmergencyNumber: String? = null
+) {
+    val showContactActionCard: Boolean
+        get() = pendingActionType == ToolActionTypes.CALL_CONTACT &&
+            !pendingPhoneNumber.isNullOrBlank()
+
+    val showSafetyActionCard: Boolean
+        get() = pendingActionType == ToolActionTypes.ALERT_TRUSTED_CONTACT &&
+            !pendingPhoneNumber.isNullOrBlank()
+
+    val showEmergencyActionCard: Boolean
+        get() = pendingActionType == ToolActionTypes.HIGH_RISK_SAFETY
+}

@@ -7,6 +7,9 @@ import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.repository.ConversationRepository
+import com.aasa.eldercare.tools.ToolActionTypes
+import com.aasa.eldercare.tools.ToolResult
+import com.aasa.eldercare.tools.ToolResultKeys
 import com.aasa.eldercare.voice.SpeechEvent
 import com.aasa.eldercare.voice.SpeechToTextManager
 import com.aasa.eldercare.voice.TextToSpeechManager
@@ -89,11 +92,17 @@ class HomeViewModel(
                 toolExecutionSuccess = null,
                 toolResultMessage = null,
                 toolResultData = emptyMap(),
-                persistedToolResultMessage = null
+                persistedToolResultMessage = null,
+                pendingActionType = null,
+                pendingContactName = null,
+                pendingPhoneNumber = null,
+                pendingAlertMessage = null,
+                pendingEmergencyNumber = null
             )
             runCatching { orchestrator.handleUserMessage(message) }
                 .onSuccess { result ->
                     val persisted = result.toolResult.data["persisted"] as? Boolean == true
+                    val pending = parsePendingAction(result.toolResult)
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         agentAction = result.action,
@@ -102,7 +111,12 @@ class HomeViewModel(
                         toolResultData = result.toolResult.data,
                         persistedToolResultMessage = result.toolResult.message
                             .takeIf { persisted && result.toolResult.success },
-                        errorMessage = null
+                        errorMessage = null,
+                        pendingActionType = pending.actionType,
+                        pendingContactName = pending.contactName,
+                        pendingPhoneNumber = pending.phoneNumber,
+                        pendingAlertMessage = pending.alertMessage,
+                        pendingEmergencyNumber = pending.emergencyNumber
                     )
                     val spoken = result.action.assistantResponse
                         .ifBlank { result.toolResult.message }
@@ -118,9 +132,60 @@ class HomeViewModel(
                         toolResultMessage = null,
                         toolResultData = emptyMap(),
                         persistedToolResultMessage = null,
-                        errorMessage = error.toReadableMessage()
+                        errorMessage = error.toReadableMessage(),
+                        pendingActionType = null,
+                        pendingContactName = null,
+                        pendingPhoneNumber = null,
+                        pendingAlertMessage = null,
+                        pendingEmergencyNumber = null
                     )
                 }
+        }
+    }
+
+    /**
+     * Convert a [ToolResult]'s `data` map into a strongly-typed
+     * [PendingAction] payload the UI can render. Tool results that
+     * don't include an `actionType` recognized by the UI produce an
+     * empty [PendingAction] so the action cards stay hidden.
+     */
+    private fun parsePendingAction(result: ToolResult): PendingAction {
+        val data = result.data
+        val actionType = (data[ToolResultKeys.ACTION_TYPE] as? String).orEmpty()
+        if (!result.success) return PendingAction.NONE
+        return when (actionType) {
+            ToolActionTypes.CALL_CONTACT,
+            ToolActionTypes.ALERT_TRUSTED_CONTACT,
+            ToolActionTypes.HIGH_RISK_SAFETY -> PendingAction(
+                actionType = actionType,
+                contactName = (data[ToolResultKeys.CONTACT_NAME] as? String)?.takeIf { it.isNotBlank() },
+                phoneNumber = (data[ToolResultKeys.PHONE_NUMBER] as? String)?.takeIf { it.isNotBlank() },
+                alertMessage = (data[ToolResultKeys.ALERT_MESSAGE] as? String)?.takeIf { it.isNotBlank() },
+                emergencyNumber = (data[ToolResultKeys.EMERGENCY_NUMBER] as? String)?.takeIf { it.isNotBlank() }
+            )
+            else -> PendingAction.NONE
+        }
+    }
+
+    fun dismissPendingAction() {
+        _uiState.value = _uiState.value.copy(
+            pendingActionType = null,
+            pendingContactName = null,
+            pendingPhoneNumber = null,
+            pendingAlertMessage = null,
+            pendingEmergencyNumber = null
+        )
+    }
+
+    private data class PendingAction(
+        val actionType: String? = null,
+        val contactName: String? = null,
+        val phoneNumber: String? = null,
+        val alertMessage: String? = null,
+        val emergencyNumber: String? = null
+    ) {
+        companion object {
+            val NONE = PendingAction()
         }
     }
 

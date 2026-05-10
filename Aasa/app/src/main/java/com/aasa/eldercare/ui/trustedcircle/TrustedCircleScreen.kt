@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.data.entity.TrustedContactEntity
+import com.aasa.eldercare.ui.IntentActionLauncher
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +53,7 @@ fun TrustedCircleScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     LaunchedEffect(uiState.preparedMessage?.id) {
         val msg = uiState.preparedMessage ?: return@LaunchedEffect
@@ -79,12 +81,31 @@ fun TrustedCircleScreen(
             innerPadding = innerPadding,
             uiState = uiState,
             onRefresh = viewModel::refresh,
-            onPrepareCall = viewModel::onPrepareCall,
-            onPrepareAlert = viewModel::onPrepareAlert,
+            onPrepareCall = { contact ->
+                viewModel.onPrepareCall(contact)
+                IntentActionLauncher.openDialer(context, contact.phoneNumber)
+            },
+            onPrepareAlert = { contact ->
+                viewModel.onPrepareAlert(contact)
+                IntentActionLauncher.openSms(
+                    context = context,
+                    phoneNumber = contact.phoneNumber,
+                    body = buildDemoAlertMessage(contact)
+                )
+            },
             onDismissError = viewModel::clearError
         )
     }
 }
+
+/**
+ * Phase 7 demo alert template used when the elder taps "Prepare Alert"
+ * directly from the trusted-circle screen (vs. the safety flow on
+ * Home, which uses the SafetyTool-supplied message instead).
+ */
+private fun buildDemoAlertMessage(contact: TrustedContactEntity): String =
+    "Aasa demo alert from your elder. " +
+        "Hi ${contact.name}, please check in when you have a moment."
 
 @Composable
 private fun TrustedCircleContent(

@@ -4,10 +4,13 @@ import com.aasa.eldercare.agent.AgentAction
 import com.aasa.eldercare.data.repository.TrustedContactRepository
 
 /**
- * Resolves a trusted contact from Room and *prepares* the call (no real
- * dialer intent yet – that arrives with the next phase). The resolved
- * phone number is included in [ToolResult.data] so a future tool layer
- * can launch `ACTION_DIAL` without re-querying the DB.
+ * Resolves a trusted contact from Room and *prepares* a call action.
+ *
+ * Phase 7: the tool no longer claims the call has happened. Instead it
+ * returns a deferred-confirmation payload (`actionType = CALL_CONTACT`,
+ * `phoneNumber`, `contactName`) that the Home screen renders as a
+ * single-tap "Open Dialer" card. The actual `ACTION_DIAL` happens in
+ * the UI layer; tools never launch intents themselves.
  */
 class TrustedContactTool(
     private val repository: TrustedContactRepository
@@ -24,32 +27,33 @@ class TrustedContactTool(
                 message = "No trusted contact configured. Add Priya or another contact first.",
                 data = mapOf(
                     "requestedName" to requestedName,
-                    "intent" to action.intent,
-                    "persisted" to false
+                    ToolResultKeys.INTENT to action.intent,
+                    ToolResultKeys.PERSISTED to false
                 )
             )
 
         return when (action.intent.uppercase()) {
             INTENT_CALL -> ToolResult.ok(
-                message = "Prepared call action for ${resolvedContact.name}.",
+                message = "Tap to call ${resolvedContact.name} at ${resolvedContact.phoneNumber}.",
                 data = mapOf(
-                    "contactId" to resolvedContact.id,
-                    "contactName" to resolvedContact.name,
-                    "phoneNumber" to resolvedContact.phoneNumber,
-                    "relationship" to resolvedContact.relationship,
-                    "isPrimary" to resolvedContact.isPrimary,
-                    "intent" to action.intent,
+                    ToolResultKeys.ACTION_TYPE to ToolActionTypes.CALL_CONTACT,
+                    ToolResultKeys.CONTACT_ID to resolvedContact.id,
+                    ToolResultKeys.CONTACT_NAME to resolvedContact.name,
+                    ToolResultKeys.PHONE_NUMBER to resolvedContact.phoneNumber,
+                    ToolResultKeys.RELATIONSHIP to resolvedContact.relationship,
+                    ToolResultKeys.IS_PRIMARY to resolvedContact.isPrimary,
+                    ToolResultKeys.INTENT to action.intent,
                     "dialerLaunched" to false,
-                    "persisted" to false
+                    ToolResultKeys.PERSISTED to false
                 )
             )
             else -> ToolResult.ok(
                 message = "Trusted contact intent received: ${action.intent} for ${resolvedContact.name}.",
                 data = mapOf(
-                    "contactId" to resolvedContact.id,
-                    "contactName" to resolvedContact.name,
-                    "intent" to action.intent,
-                    "persisted" to false
+                    ToolResultKeys.CONTACT_ID to resolvedContact.id,
+                    ToolResultKeys.CONTACT_NAME to resolvedContact.name,
+                    ToolResultKeys.INTENT to action.intent,
+                    ToolResultKeys.PERSISTED to false
                 )
             )
         }

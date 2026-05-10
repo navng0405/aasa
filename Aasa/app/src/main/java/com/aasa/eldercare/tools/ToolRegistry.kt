@@ -49,7 +49,7 @@ class ToolRegistry private constructor(
                 ChatTool(),
                 MedicationTool(medicationRepository),
                 MemoryTool(memoryRepository),
-                SafetyTool(),
+                SafetyTool(trustedContactRepository),
                 TrustedContactTool(trustedContactRepository),
                 ReminderTool()
             )

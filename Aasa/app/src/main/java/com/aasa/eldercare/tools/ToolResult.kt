@@ -20,3 +20,35 @@ data class ToolResult(
             ToolResult(success = false, message = message, data = data)
     }
 }
+
+/**
+ * Canonical keys used inside [ToolResult.data] so the UI / ViewModel
+ * can look them up without sprinkling string literals across the
+ * codebase. Tools must use these constants when populating action
+ * payloads consumed by the Home screen action cards.
+ */
+object ToolResultKeys {
+    const val ACTION_TYPE = "actionType"
+    const val CONTACT_ID = "contactId"
+    const val CONTACT_NAME = "contactName"
+    const val PHONE_NUMBER = "phoneNumber"
+    const val RELATIONSHIP = "relationship"
+    const val IS_PRIMARY = "isPrimary"
+    const val ALERT_MESSAGE = "alertMessage"
+    const val EMERGENCY_NUMBER = "emergencyNumber"
+    const val INTENT = "intent"
+    const val PERSISTED = "persisted"
+    const val ORIGINAL_RISK_LEVEL = "originalRiskLevel"
+    const val EFFECTIVE_RISK_LEVEL = "effectiveRiskLevel"
+}
+
+/**
+ * Action types the UI knows how to render as a deferred-confirmation
+ * card. Keeping these as plain strings (instead of an enum) preserves
+ * the cross-process JSON contract Gemma already speaks.
+ */
+object ToolActionTypes {
+    const val CALL_CONTACT = "CALL_CONTACT"
+    const val ALERT_TRUSTED_CONTACT = "ALERT_TRUSTED_CONTACT"
+    const val HIGH_RISK_SAFETY = "HIGH_RISK_SAFETY"
+}
