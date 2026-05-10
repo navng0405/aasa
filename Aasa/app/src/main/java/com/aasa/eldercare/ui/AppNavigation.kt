@@ -32,13 +32,19 @@ fun AppNavigation() {
             )
         }
         composable(AasaRoutes.MEDICATION) {
-            MedicationScreen()
+            MedicationScreen(
+                onBack = { navController.popBackStack() }
+            )
         }
         composable(AasaRoutes.MEMORY) {
-            MemoryScreen()
+            MemoryScreen(
+                onBack = { navController.popBackStack() }
+            )
         }
         composable(AasaRoutes.TRUSTED_CIRCLE) {
-            TrustedCircleScreen()
+            TrustedCircleScreen(
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }
