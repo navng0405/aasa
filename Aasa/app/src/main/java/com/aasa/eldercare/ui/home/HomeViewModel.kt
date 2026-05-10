@@ -3,10 +3,11 @@ package com.aasa.eldercare.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.aasa.eldercare.model.ModelRunner
+import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.model.RemoteLocalGemmaRunner
-import com.aasa.eldercare.network.AgentMessageResponse
 import com.aasa.eldercare.network.RetrofitClient
+import com.aasa.eldercare.tools.ToolRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,24 +16,22 @@ import kotlinx.coroutines.launch
 /**
  * UI state for the Aasa home / chat screen.
  *
- * The screen is intentionally simple in Phase 2:
- *   - the user types (or taps a sample) -> [inputText]
- *   - we POST it to the local FastAPI bridge -> [isLoading]
- *   - we either show the parsed agent response -> [parsedResponse]
- *   - or a human-readable error -> [errorMessage]
- *
- * The raw model output is also surfaced in [parsedResponse.rawResponse]
- * for debugging.
+ * Phase 3 surfaces *both* the Gemma decision ([agentAction]) and the
+ * locally-executed tool outcome ([toolExecutionSuccess], [toolResultMessage],
+ * [toolResultData]).
  */
 data class HomeUiState(
     val inputText: String = "",
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val parsedResponse: AgentMessageResponse? = null
+    val agentAction: AgentAction? = null,
+    val toolExecutionSuccess: Boolean? = null,
+    val toolResultMessage: String? = null,
+    val toolResultData: Map<String, Any?> = emptyMap()
 )
 
 class HomeViewModel(
-    private val modelRunner: ModelRunner
+    private val orchestrator: AgentOrchestrator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -42,10 +41,6 @@ class HomeViewModel(
         _uiState.value = _uiState.value.copy(inputText = text)
     }
 
-    /**
-     * Convenience used by the sample buttons: replace the input box with
-     * the given text and immediately send it.
-     */
     fun sendSample(message: String) {
         _uiState.value = _uiState.value.copy(inputText = message)
         sendCurrentMessage()
@@ -59,20 +54,29 @@ class HomeViewModel(
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
                 errorMessage = null,
-                parsedResponse = null
+                agentAction = null,
+                toolExecutionSuccess = null,
+                toolResultMessage = null,
+                toolResultData = emptyMap()
             )
-            runCatching { modelRunner.sendMessage(message) }
-                .onSuccess { response ->
+            runCatching { orchestrator.handleUserMessage(message) }
+                .onSuccess { result ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        parsedResponse = response,
+                        agentAction = result.action,
+                        toolExecutionSuccess = result.toolResult.success,
+                        toolResultMessage = result.toolResult.message,
+                        toolResultData = result.toolResult.data,
                         errorMessage = null
                     )
                 }
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        parsedResponse = null,
+                        agentAction = null,
+                        toolExecutionSuccess = null,
+                        toolResultMessage = null,
+                        toolResultData = emptyMap(),
                         errorMessage = error.toReadableMessage()
                     )
                 }
@@ -87,20 +91,27 @@ class HomeViewModel(
         message?.takeIf { it.isNotBlank() } ?: this::class.java.simpleName
 
     /**
-     * Default factory that wires a real [RemoteLocalGemmaRunner] backed by
-     * [RetrofitClient]. Tests / previews can construct [HomeViewModel]
-     * directly with a fake [ModelRunner].
+     * Default factory wires production dependencies: real Retrofit-backed
+     * Gemma runner + the default [ToolRegistry]. Tests / previews can
+     * construct the [HomeViewModel] directly with a fake orchestrator.
      */
     class Factory(
-        private val modelRunner: ModelRunner =
-            RemoteLocalGemmaRunner(RetrofitClient.apiService)
+        private val orchestrator: AgentOrchestrator = defaultOrchestrator()
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(HomeViewModel::class.java)) {
                 "Unknown ViewModel class: $modelClass"
             }
-            return HomeViewModel(modelRunner) as T
+            return HomeViewModel(orchestrator) as T
+        }
+
+        companion object {
+            private fun defaultOrchestrator(): AgentOrchestrator =
+                AgentOrchestrator(
+                    modelRunner = RemoteLocalGemmaRunner(RetrofitClient.apiService),
+                    toolRegistry = ToolRegistry.createDefault()
+                )
         }
     }
 }

@@ -29,7 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.aasa.eldercare.network.AgentMessageResponse
+import com.aasa.eldercare.agent.AgentAction
 import com.google.gson.GsonBuilder
 
 private val SAMPLE_MESSAGES = listOf(
@@ -99,9 +99,17 @@ fun HomeScreen(
                 ErrorCard(message = error, onDismiss = viewModel::clearError)
             }
 
-            uiState.parsedResponse?.let { parsed ->
-                ParsedResponseCard(response = parsed)
-                RawResponseCard(rawResponse = parsed.rawResponse)
+            if (uiState.toolExecutionSuccess != null) {
+                ToolExecutionCard(
+                    success = uiState.toolExecutionSuccess == true,
+                    message = uiState.toolResultMessage.orEmpty(),
+                    data = uiState.toolResultData
+                )
+            }
+
+            uiState.agentAction?.let { action ->
+                ParsedResponseCard(action = action)
+                RawResponseCard(rawResponse = action.rawResponse)
             }
 
             NavigationShortcuts(
@@ -175,7 +183,57 @@ private fun ErrorCard(message: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ParsedResponseCard(response: AgentMessageResponse) {
+private fun ToolExecutionCard(
+    success: Boolean,
+    message: String,
+    data: Map<String, Any?>
+) {
+    val container = if (success) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.errorContainer
+    }
+    val onContainer = if (success) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onErrorContainer
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Tool execution result",
+                style = MaterialTheme.typography.titleMedium,
+                color = onContainer
+            )
+            LabeledLine(
+                label = "Success",
+                value = success.toString(),
+                valueColor = onContainer
+            )
+            LabeledLine(
+                label = "Message",
+                value = message.ifBlank { "(no message)" },
+                valueColor = onContainer
+            )
+            LabeledLine(
+                label = "Data",
+                value = if (data.isEmpty()) "{}" else prettyPrintJson(data),
+                monospace = true,
+                valueColor = onContainer
+            )
+        }
+    }
+}
+
+@Composable
+private fun ParsedResponseCard(action: AgentAction) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -185,27 +243,19 @@ private fun ParsedResponseCard(response: AgentMessageResponse) {
                 text = "Parsed response",
                 style = MaterialTheme.typography.titleMedium
             )
-            response.assistantResponse?.let {
-                LabeledLine(label = "Assistant", value = it)
+            if (action.assistantResponse.isNotBlank()) {
+                LabeledLine(label = "Assistant", value = action.assistantResponse)
             }
-            response.intent?.let {
-                LabeledLine(label = "Intent", value = it)
+            LabeledLine(label = "Intent", value = action.intent)
+            LabeledLine(label = "Risk level", value = action.riskLevel)
+            LabeledLine(label = "Tool", value = action.tool)
+            if (action.arguments.isNotEmpty()) {
+                LabeledLine(
+                    label = "Arguments",
+                    value = prettyPrintJson(action.arguments),
+                    monospace = true
+                )
             }
-            response.riskLevel?.let {
-                LabeledLine(label = "Risk level", value = it)
-            }
-            response.tool?.let {
-                LabeledLine(label = "Tool", value = it)
-            }
-            response.arguments
-                ?.takeIf { it.isNotEmpty() }
-                ?.let { args ->
-                    LabeledLine(
-                        label = "Arguments",
-                        value = prettyPrintJson(args),
-                        monospace = true
-                    )
-                }
         }
     }
 }
@@ -242,7 +292,8 @@ private fun RawResponseCard(rawResponse: String?) {
 private fun LabeledLine(
     label: String,
     value: String,
-    monospace: Boolean = false
+    monospace: Boolean = false,
+    valueColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
@@ -253,6 +304,7 @@ private fun LabeledLine(
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
+            color = valueColor,
             fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default
         )
     }
