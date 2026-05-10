@@ -1,5 +1,9 @@
 package com.aasa.eldercare.ui.home
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -7,12 +11,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -31,7 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentAction
@@ -59,6 +69,22 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
+    val context = LocalContext.current
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted -> viewModel.onMicPermissionResult(granted) }
+    )
+
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        // Sync the cached permission state without auto-starting the
+        // recognizer; the elder must still tap the mic button.
+        viewModel.setMicPermissionGranted(granted)
+    }
 
     Scaffold(
         topBar = {
@@ -76,6 +102,23 @@ fun HomeScreen(
             Text(
                 text = "Talk to your local Gemma assistant",
                 style = MaterialTheme.typography.titleMedium
+            )
+
+            VoiceSection(
+                uiState = uiState,
+                onMicClick = {
+                    if (uiState.isListening) {
+                        viewModel.stopListening()
+                        return@VoiceSection
+                    }
+                    if (uiState.hasMicPermission) {
+                        viewModel.startListening()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onStopSpeakingClick = viewModel::stopSpeaking,
+                onDismissVoiceError = viewModel::clearVoiceError
             )
 
             OutlinedTextField(
@@ -145,6 +188,179 @@ private fun aasaHomeViewModel(): HomeViewModel {
     val application = LocalContext.current.applicationContext as AasaApplication
     return viewModel(factory = HomeViewModel.Factory(application))
 }
+
+// ---------------------------------------------------------------------
+// Voice-first section (Phase 6)
+// ---------------------------------------------------------------------
+
+@Composable
+private fun VoiceSection(
+    uiState: HomeUiState,
+    onMicClick: () -> Unit,
+    onStopSpeakingClick: () -> Unit,
+    onDismissVoiceError: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MicButton(
+            isListening = uiState.isListening,
+            isSpeaking = uiState.isSpeaking,
+            isDisabled = uiState.isLoading,
+            onClick = onMicClick
+        )
+
+        if (uiState.isSpeaking) {
+            OutlinedButton(
+                onClick = onStopSpeakingClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "Stop Speaking")
+            }
+        }
+
+        uiState.recognizedSpeech?.takeIf { it.isNotBlank() }?.let { spoken ->
+            RecognizedSpeechCard(text = spoken)
+        }
+
+        uiState.voiceError?.let { error ->
+            VoiceErrorCard(message = error, onDismiss = onDismissVoiceError)
+        }
+
+        uiState.ttsStatus?.let { status ->
+            TtsStatusPill(status = status)
+        }
+    }
+}
+
+@Composable
+private fun MicButton(
+    isListening: Boolean,
+    isSpeaking: Boolean,
+    isDisabled: Boolean,
+    onClick: () -> Unit
+) {
+    val (label, container) = when {
+        isListening -> "Listening..." to MaterialTheme.colorScheme.tertiary
+        isSpeaking -> "Speaking..." to MaterialTheme.colorScheme.secondary
+        else -> "Tap to Speak" to MaterialTheme.colorScheme.primary
+    }
+    Button(
+        onClick = onClick,
+        enabled = !isDisabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(88.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = container,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        )
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MicGlyph()
+            Text(
+                text = label,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+/**
+ * Tiny circular glyph standing in for a microphone icon. Avoids the
+ * extra material-icons dependency surface and keeps the mic button
+ * usable on any device.
+ */
+@Composable
+private fun MicGlyph() {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "\uD83C\uDFA4",
+            fontSize = 18.sp
+        )
+    }
+}
+
+@Composable
+private fun RecognizedSpeechCard(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "I heard",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceErrorCard(message: String, onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Voice",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            OutlinedButton(onClick = onDismiss) { Text("Dismiss") }
+        }
+    }
+}
+
+@Composable
+private fun TtsStatusPill(status: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = status,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+// ---------------------------------------------------------------------
+// Existing sections (Phase 4) -- unchanged behavior
+// ---------------------------------------------------------------------
 
 @Composable
 private fun SampleButtons(

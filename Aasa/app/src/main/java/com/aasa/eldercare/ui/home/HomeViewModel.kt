@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aasa.eldercare.AasaApplication
-import com.aasa.eldercare.agent.AgentAction
 import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.repository.ConversationRepository
+import com.aasa.eldercare.voice.SpeechEvent
+import com.aasa.eldercare.voice.SpeechToTextManager
+import com.aasa.eldercare.voice.TextToSpeechManager
+import com.aasa.eldercare.voice.TtsEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,32 +19,26 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * UI state for the Aasa home / chat screen.
+ * Drives the Home / chat screen.
  *
- * Phase 4 surfaces:
- *  - the Gemma decision ([agentAction])
- *  - the live tool execution outcome ([toolExecutionSuccess], [toolResultMessage], [toolResultData])
- *  - a redundant [persistedToolResultMessage] that is only set when the
- *    tool actually wrote to Room (so the UI can show a "Persisted in
- *    Room" pill and the user can be confident the action survived)
- *  - [recentConversations] is a separate, always-current StateFlow –
- *    pulled directly from Room so it persists across cold starts.
+ * Owns:
+ *  - a [SpeechToTextManager] that converts elder speech into a
+ *    transcript and feeds it into [sendMessage].
+ *  - a [TextToSpeechManager] that reads the agent's response aloud
+ *    after each successful turn.
+ *  - the existing Phase 4 conversation flow against [orchestrator]
+ *    and [conversationRepository], which is unchanged.
+ *
+ * Lifecycle: both voice managers are released in [onCleared]. The
+ * STT and TTS event flows are collected once during init() with
+ * [viewModelScope]; the [SpeechToTextManager] uses replay = 0 so we
+ * do not need to track subscription state.
  */
-data class HomeUiState(
-    val inputText: String = "",
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-    val agentAction: AgentAction? = null,
-    val toolExecutionSuccess: Boolean? = null,
-    val toolResultMessage: String? = null,
-    val toolResultData: Map<String, Any?> = emptyMap(),
-    val persistedToolResultMessage: String? = null,
-    val isResettingDemoData: Boolean = false
-)
-
 class HomeViewModel(
     private val orchestrator: AgentOrchestrator,
     private val conversationRepository: ConversationRepository,
+    private val speechToTextManager: SpeechToTextManager,
+    private val textToSpeechManager: TextToSpeechManager,
     private val resetDemoDataAction: suspend () -> Unit
 ) : ViewModel() {
 
@@ -57,6 +54,15 @@ class HomeViewModel(
                 initialValue = emptyList()
             )
 
+    init {
+        observeSpeechEvents()
+        observeTtsEvents()
+    }
+
+    // ---------------------------------------------------------------
+    // Existing text flow (Phase 4) -- intentionally unchanged behavior.
+    // ---------------------------------------------------------------
+
     fun onInputChange(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
     }
@@ -69,9 +75,14 @@ class HomeViewModel(
     fun sendCurrentMessage() {
         val message = _uiState.value.inputText.trim()
         if (message.isEmpty() || _uiState.value.isLoading) return
+        sendMessage(message)
+    }
 
+    private fun sendMessage(message: String) {
+        if (_uiState.value.isLoading) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
+                inputText = message,
                 isLoading = true,
                 errorMessage = null,
                 agentAction = null,
@@ -93,6 +104,11 @@ class HomeViewModel(
                             .takeIf { persisted && result.toolResult.success },
                         errorMessage = null
                     )
+                    val spoken = result.action.assistantResponse
+                        .ifBlank { result.toolResult.message }
+                    if (spoken.isNotBlank()) {
+                        textToSpeechManager.speak(spoken)
+                    }
                 }
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(
@@ -126,13 +142,154 @@ class HomeViewModel(
         }
     }
 
+    // ---------------------------------------------------------------
+    // Voice flow (Phase 6).
+    // ---------------------------------------------------------------
+
+    /**
+     * Sync the cached permission flag without changing recognizer
+     * state. Safe to call from the screen's LaunchedEffect on every
+     * recomposition.
+     */
+    fun setMicPermissionGranted(granted: Boolean) {
+        if (_uiState.value.hasMicPermission == granted) return
+        _uiState.value = _uiState.value.copy(
+            hasMicPermission = granted,
+            voiceError = if (!granted) {
+                "Microphone permission is needed for voice input."
+            } else {
+                null
+            }
+        )
+    }
+
+    /**
+     * Result callback for the Compose permission launcher. Mirrors the
+     * elder's choice into UI state and, if granted in this very turn,
+     * immediately starts listening so the mic tap → speak flow doesn't
+     * require a second tap.
+     */
+    fun onMicPermissionResult(granted: Boolean) {
+        setMicPermissionGranted(granted)
+        if (granted) {
+            startListening()
+        }
+    }
+
+    fun startListening() {
+        if (_uiState.value.isListening) return
+        if (!_uiState.value.hasMicPermission) {
+            _uiState.value = _uiState.value.copy(
+                voiceError = "Microphone permission is needed for voice input."
+            )
+            return
+        }
+        // Stop any in-flight TTS so the recognizer doesn't pick up
+        // the device's own voice.
+        if (_uiState.value.isSpeaking) {
+            textToSpeechManager.stop()
+        }
+        _uiState.value = _uiState.value.copy(
+            voiceError = null,
+            recognizedSpeech = null
+        )
+        speechToTextManager.startListening()
+    }
+
+    fun stopListening() {
+        speechToTextManager.stopListening()
+    }
+
+    fun stopSpeaking() {
+        textToSpeechManager.stop()
+    }
+
+    fun clearVoiceError() {
+        _uiState.value = _uiState.value.copy(voiceError = null)
+    }
+
+    /**
+     * Public hook for callers (Compose-side launchers, tests) that
+     * already have a recognized transcript. Mirrors the path the
+     * recognizer takes when [SpeechEvent.Recognized] arrives.
+     */
+    fun onSpeechRecognized(text: String) {
+        val cleaned = text.trim()
+        if (cleaned.isBlank()) return
+        _uiState.value = _uiState.value.copy(
+            recognizedSpeech = cleaned,
+            inputText = cleaned,
+            voiceError = null
+        )
+        sendMessage(cleaned)
+    }
+
+    private fun observeSpeechEvents() {
+        viewModelScope.launch {
+            speechToTextManager.isListening.collect { listening ->
+                _uiState.value = _uiState.value.copy(isListening = listening)
+            }
+        }
+        viewModelScope.launch {
+            speechToTextManager.events.collect { event ->
+                when (event) {
+                    is SpeechEvent.Partial -> {
+                        _uiState.value = _uiState.value.copy(
+                            recognizedSpeech = event.text,
+                            inputText = event.text
+                        )
+                    }
+                    is SpeechEvent.Recognized -> {
+                        onSpeechRecognized(event.text)
+                    }
+                    is SpeechEvent.Error -> {
+                        _uiState.value = _uiState.value.copy(
+                            isListening = false,
+                            voiceError = event.message
+                        )
+                    }
+                    SpeechEvent.ReadyForSpeech,
+                    SpeechEvent.BeginningOfSpeech,
+                    SpeechEvent.EndOfSpeech -> Unit
+                }
+            }
+        }
+    }
+
+    private fun observeTtsEvents() {
+        viewModelScope.launch {
+            textToSpeechManager.isSpeaking.collect { speaking ->
+                _uiState.value = _uiState.value.copy(isSpeaking = speaking)
+            }
+        }
+        viewModelScope.launch {
+            textToSpeechManager.status.collect { status ->
+                _uiState.value = _uiState.value.copy(ttsStatus = status)
+            }
+        }
+        viewModelScope.launch {
+            textToSpeechManager.events.collect { event ->
+                if (event is TtsEvent.Error) {
+                    _uiState.value = _uiState.value.copy(voiceError = event.message)
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        speechToTextManager.destroy()
+        textToSpeechManager.shutdown()
+        super.onCleared()
+    }
+
     private fun Throwable.toReadableMessage(): String =
         message?.takeIf { it.isNotBlank() } ?: this::class.java.simpleName
 
     /**
-     * Default factory: resolves the orchestrator, repositories and the
-     * reset-demo action from [AasaApplication]. Tests / previews can
-     * construct [HomeViewModel] directly with fakes.
+     * Default factory: resolves the orchestrator, repositories, voice
+     * managers, and the reset-demo action from [AasaApplication].
+     * Tests / previews can construct [HomeViewModel] directly with
+     * fakes.
      */
     class Factory(
         private val application: AasaApplication
@@ -145,6 +302,8 @@ class HomeViewModel(
             return HomeViewModel(
                 orchestrator = application.agentOrchestrator,
                 conversationRepository = application.conversationRepository,
+                speechToTextManager = SpeechToTextManager(application.applicationContext),
+                textToSpeechManager = TextToSpeechManager(application.applicationContext),
                 resetDemoDataAction = { application.resetDemoData() }
             ) as T
         }
