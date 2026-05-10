@@ -128,3 +128,20 @@ If Android cannot reach the server, rerun:
 ```bash
 adb reverse tcp:8000 tcp:8000
 ```
+
+## POC Medication Log Behavior
+
+The FastAPI bridge currently keeps a small in-memory medication log while the
+server process is running. For example:
+
+1. User: `I took BP tablet.`
+2. Aasa logs the medication with the current time.
+3. User: `Did I take BP tablet?`
+4. Aasa answers from the in-memory log, such as:
+
+```text
+Yes, you took your BP tablet at 7:28 PM.
+```
+
+This log resets when the FastAPI server restarts. The real app should later move
+this into Room on Android.
