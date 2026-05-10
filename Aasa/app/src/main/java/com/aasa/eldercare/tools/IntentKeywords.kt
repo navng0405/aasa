@@ -9,14 +9,14 @@ package com.aasa.eldercare.tools
  * boundaries and don't silently miss obvious phrasings like
  * `"did I take BP tablet"` (no `today`, no `my`).
  *
- * Two conditions must both hold for a match:
- *   1. the message contains at least one medication noun, and
- *   2. the message contains at least one verb-shape trigger.
- *
  * Safety phrasing lives in [SafetyKeywords] – it is checked before
  * these rules and always wins.
  */
 object IntentKeywords {
+
+    // ----------------------------------------------------------------
+    // Medication intent
+    // ----------------------------------------------------------------
 
     /** Words the elder uses to refer to a medication. */
     private val MEDICATION_NOUNS: List<String> = listOf(
@@ -36,13 +36,11 @@ object IntentKeywords {
         "injection",
         "capsule",
         "capsules",
-        // Demo-specific shorthands the elder may use without a noun:
+        // Demo-specific shorthands the elder may use:
         "bp tablet",
         "bp medicine",
         "bp pill"
     )
-
-    // ---------------- "Did I take ..." style queries -----------------
 
     private val MEDICATION_CHECK_TRIGGERS: List<String> = listOf(
         "did i take",
@@ -67,19 +65,6 @@ object IntentKeywords {
         "have you logged"
     )
 
-    /**
-     * `true` when the message is unambiguously asking about today's
-     * medication state. Requires both a medication noun and a check
-     * trigger so "did I take a walk?" does not false-positive.
-     */
-    fun isMedicationCheckQuery(text: String): Boolean {
-        val lower = text.lowercase()
-        if (MEDICATION_NOUNS.none { lower.contains(it) }) return false
-        return MEDICATION_CHECK_TRIGGERS.any { lower.contains(it) }
-    }
-
-    // ---------------- "I took ..." style logs ------------------------
-
     private val MEDICATION_LOG_TRIGGERS: List<String> = listOf(
         "i took",
         "i just took",
@@ -95,13 +80,90 @@ object IntentKeywords {
         "swallowed my"
     )
 
-    /**
-     * `true` when the message is unambiguously declaring that the elder
-     * took a medication.
-     */
+    /** Both a check trigger AND a medication noun must be present. */
+    fun isMedicationCheckQuery(text: String): Boolean {
+        val lower = text.lowercase()
+        if (MEDICATION_NOUNS.none { lower.contains(it) }) return false
+        return MEDICATION_CHECK_TRIGGERS.any { lower.contains(it) }
+    }
+
+    /** Both a log trigger AND a medication noun must be present. */
     fun isMedicationLogStatement(text: String): Boolean {
         val lower = text.lowercase()
         if (MEDICATION_NOUNS.none { lower.contains(it) }) return false
         return MEDICATION_LOG_TRIGGERS.any { lower.contains(it) }
+    }
+
+    // ----------------------------------------------------------------
+    // Memory save intent
+    // ----------------------------------------------------------------
+
+    /**
+     * Strong "this is a fact to remember" signals. Each trigger is
+     * specific enough that a substring hit is unambiguous on its own
+     * (we deliberately use `"remember that"` instead of `"remember"`,
+     * for example, so `"remember to call Priya"` does NOT match).
+     */
+    private val MEMORY_SAVE_TRIGGERS: List<String> = listOf(
+        // Explicit "save this" markers
+        "remember that",
+        "remember this",
+        "please remember that",
+        "don't forget that",
+        "don't forget about",
+        "do not forget that",
+        "note that",
+        "note down",
+        "make a note",
+        "save this",
+        "keep in mind that",
+
+        // Event-date declarations
+        "birthday is",
+        "birthday on",
+        "birthday was",
+        "birthday falls on",
+        "anniversary is",
+        "anniversary on",
+        "anniversary was",
+        "wedding is",
+        "wedding on",
+        "wedding date",
+
+        // Preference declarations
+        "my favorite",
+        "my favourite"
+    )
+
+    /**
+     * Map of memory triggers to a coarse memory `type`. Used by
+     * [deriveMemoryType] when Gemma didn't classify the memory itself.
+     */
+    private val MEMORY_TYPE_HINTS: List<Pair<String, String>> = listOf(
+        "birthday" to "BIRTHDAY",
+        "anniversary" to "ANNIVERSARY",
+        "wedding" to "WEDDING",
+        "favorite music" to "FAVORITE_MUSIC",
+        "favourite music" to "FAVORITE_MUSIC",
+        "favorite food" to "FAVORITE_FOOD",
+        "favourite food" to "FAVORITE_FOOD",
+        "favorite" to "FAVORITE",
+        "favourite" to "FAVORITE"
+    )
+
+    fun isMemorySaveStatement(text: String): Boolean {
+        val lower = text.lowercase()
+        return MEMORY_SAVE_TRIGGERS.any { lower.contains(it) }
+    }
+
+    /**
+     * Best-effort coarse type for a memory derived from the raw user
+     * message – used by [com.aasa.eldercare.tools.MemoryTool] when
+     * Gemma didn't supply a type itself.
+     */
+    fun deriveMemoryType(text: String): String {
+        val lower = text.lowercase()
+        return MEMORY_TYPE_HINTS.firstOrNull { lower.contains(it.first) }?.second
+            ?: "GENERAL"
     }
 }

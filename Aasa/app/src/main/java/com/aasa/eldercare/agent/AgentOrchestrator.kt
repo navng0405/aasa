@@ -14,10 +14,12 @@ import com.aasa.eldercare.tools.ToolRegistry
  *   1. Persist the user message (USER role) into [ConversationRepository].
  *   2. Send the message to the local Gemma bridge via [ModelRunner].
  *   3. Convert the network DTO into a domain [AgentAction].
- *   4. Apply *deterministic overrides* on the user message:
- *        - emergency / symptom phrases  -> SafetyTool (HIGH / MEDIUM)
- *        - "did I take my medicine?"    -> MedicationTool / CHECK_MEDICATION
- *        - "I took my medicine"         -> MedicationTool / LOG_MEDICATION
+     *   4. Apply *deterministic overrides* on the user message:
+ *        - emergency / symptom phrases     -> SafetyTool (HIGH / MEDIUM)
+ *        - "did I take my medicine?"       -> MedicationTool / CHECK_MEDICATION
+ *        - "I took my medicine"            -> MedicationTool / LOG_MEDICATION
+ *        - "X's birthday is …" / "remember that …" / "my favorite …"
+ *                                          -> MemoryTool / SAVE_MEMORY
  *      Elder-care behavior must not depend on prompt-time luck; if
  *      Gemma misclassifies, the device corrects routing locally before
  *      the tool runs.
@@ -98,6 +100,22 @@ class AgentOrchestrator(
                 arguments = enrichedArgs
             )
 
+            // --- 3. Memory save override --------------------------------
+            IntentKeywords.isMemorySaveStatement(userMessage) -> action.copy(
+                intent = INTENT_SAVE_MEMORY,
+                tool = ToolNames.MEMORY,
+                riskLevel = action.riskLevel.ifBlank { RISK_LOW },
+                assistantResponse = action.assistantResponse
+                    .ifBlank { OVERRIDE_MEMORY_RESPONSE },
+                // Stash the original message + a derived coarse type so
+                // MemoryTool always produces a useful row even when
+                // Gemma left arguments empty.
+                arguments = enrichedArgs + mapOf(
+                    "note" to userMessage,
+                    "memoryType" to IntentKeywords.deriveMemoryType(userMessage)
+                )
+            )
+
             else -> action.copy(arguments = enrichedArgs)
         }
     }
@@ -106,6 +124,7 @@ class AgentOrchestrator(
         private const val INTENT_SAFETY_CHECK = "SAFETY_CHECK"
         private const val INTENT_CHECK_MEDICATION = "CHECK_MEDICATION"
         private const val INTENT_LOG_MEDICATION = "LOG_MEDICATION"
+        private const val INTENT_SAVE_MEMORY = "SAVE_MEMORY"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"
@@ -115,5 +134,9 @@ class AgentOrchestrator(
         // comes from MedicationTool's tool-result message.
         private const val OVERRIDE_CHECK_RESPONSE =
             "Let me check your medication log."
+
+        // Used only when Gemma also left the assistant response blank.
+        private const val OVERRIDE_MEMORY_RESPONSE =
+            "Saved that to your memories."
     }
 }

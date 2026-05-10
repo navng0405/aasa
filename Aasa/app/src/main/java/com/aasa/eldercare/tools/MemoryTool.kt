@@ -7,6 +7,13 @@ import com.aasa.eldercare.data.repository.MemoryRepository
  * Real, Room-backed memory tool. For `SAVE_MEMORY` we materialize the
  * Gemma-extracted arguments (name, event, date, note, …) into a
  * [com.aasa.eldercare.data.entity.MemoryEntity] row and acknowledge.
+ *
+ * The tool also handles the *defensive* case where Gemma misroutes a
+ * memory statement to ChatTool: the orchestrator still flips the
+ * routing back to MemoryTool but the arguments may be empty. In that
+ * case we fall back to the original user message (stashed under
+ * `userMessage` / `note`) and a coarse type derived from keywords like
+ * `"birthday"` or `"favorite"`.
  */
 class MemoryTool(
     private val repository: MemoryRepository
@@ -15,9 +22,7 @@ class MemoryTool(
     override val name: String = ToolNames.MEMORY
 
     override suspend fun execute(action: AgentAction): ToolResult {
-        val type = (action.arguments.stringOrNull("type")
-            ?: action.arguments.stringOrNull("memoryType")
-            ?: deriveTypeFromIntent(action.intent))
+        val type = resolveType(action)
         val title = buildTitle(action)
         val value = buildValue(action)
 
@@ -46,29 +51,48 @@ class MemoryTool(
         }
     }
 
-    private fun deriveTypeFromIntent(intent: String): String =
-        when (intent.uppercase()) {
-            INTENT_SAVE -> "GENERAL"
-            else -> intent.uppercase()
-        }
+    // ---------------------------------------------------------------
+    // Type / title / value derivation
+    // ---------------------------------------------------------------
+
+    private fun resolveType(action: AgentAction): String {
+        val args = action.arguments
+        val explicit = args.stringOrNull("type") ?: args.stringOrNull("memoryType")
+        if (explicit != null) return explicit
+
+        val userMessage = args.stringOrNull("userMessage")
+            ?: action.assistantResponse
+        return IntentKeywords.deriveMemoryType(userMessage)
+    }
 
     private fun buildTitle(action: AgentAction): String {
         val args = action.arguments
         val person = args.stringOrNull("personName") ?: args.stringOrNull("person")
         val event = args.stringOrNull("event") ?: args.stringOrNull("type")
-        return when {
-            person != null && event != null -> "$person - $event"
-            person != null -> person
-            event != null -> event
-            args.stringOrNull("title") != null -> args.stringOrNull("title")!!
-            else -> "Memory"
+        val explicitTitle = args.stringOrNull("title")
+
+        when {
+            person != null && event != null -> return "$person - $event"
+            person != null -> return person
+            event != null -> return event
+            explicitTitle != null -> return explicitTitle
         }
+
+        // Best-effort: try to derive "<Name> - <event>" from the raw
+        // user message – useful when Gemma left arguments empty.
+        val userMessage = args.stringOrNull("userMessage")
+        if (userMessage != null) {
+            deriveTitleFromUserMessage(userMessage)?.let { return it }
+        }
+        return "Memory"
     }
 
     private fun buildValue(action: AgentAction): String {
         val args = action.arguments
         val date = args.stringOrNull("date") ?: args.stringOrNull("when")
-        val note = args.stringOrNull("note") ?: args.stringOrNull("text")
+        val note = args.stringOrNull("note")
+            ?: args.stringOrNull("text")
+            ?: args.stringOrNull("userMessage")
 
         val parts = listOfNotNull(
             date?.let { "date=$it" },
@@ -83,7 +107,31 @@ class MemoryTool(
         }
     }
 
+    /**
+     * Tiny extractor for the common "<Name>'s <event> is <date>" shape.
+     * Returns e.g. `"Ananya - birthday"` for
+     * `"My granddaughter Ananya's birthday is May 12."`.
+     */
+    private fun deriveTitleFromUserMessage(message: String): String? {
+        for (keyword in EVENT_KEYWORDS) {
+            val pattern = Regex("([A-Za-z]+)'s\\s+$keyword", RegexOption.IGNORE_CASE)
+            val match = pattern.find(message) ?: continue
+            val name = match.groupValues[1]
+            return "$name - $keyword"
+        }
+        // No possessive name; surface just the event keyword if present.
+        val lower = message.lowercase()
+        return EVENT_KEYWORDS.firstOrNull { lower.contains(it) }
+            ?.replaceFirstChar { it.uppercase() }
+    }
+
     companion object {
         private const val INTENT_SAVE = "SAVE_MEMORY"
+
+        private val EVENT_KEYWORDS = listOf(
+            "birthday",
+            "anniversary",
+            "wedding"
+        )
     }
 }
