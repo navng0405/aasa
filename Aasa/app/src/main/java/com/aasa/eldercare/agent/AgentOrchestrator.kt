@@ -40,15 +40,20 @@ class AgentOrchestrator(
         val parsedAction = rawResponse.toAgentAction()
         val safeAction = applyDeterministicOverrides(message, parsedAction)
         val toolResult = toolRegistry.execute(safeAction)
+        val finalAction = if (toolResult.success && toolResult.message.isNotBlank()) {
+            safeAction.copy(assistantResponse = toolResult.message)
+        } else {
+            safeAction
+        }
 
         conversationRepository.saveAssistantMessage(
-            message = safeAction.assistantResponse,
-            intent = safeAction.intent,
-            riskLevel = safeAction.riskLevel,
-            tool = safeAction.tool
+            message = finalAction.assistantResponse,
+            intent = finalAction.intent,
+            riskLevel = finalAction.riskLevel,
+            tool = finalAction.tool
         )
 
-        return AgentExecutionResult(action = safeAction, toolResult = toolResult)
+        return AgentExecutionResult(action = finalAction, toolResult = toolResult)
     }
 
     /**

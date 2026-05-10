@@ -51,13 +51,19 @@ class MedicationRepository(
         status: String
     ): LoggedMedication {
         val medication = findOrCreate(medicineName)
+        val loggedAt = System.currentTimeMillis()
         val logId = dao.insertMedicationLog(
-            MedicationLogEntity(medicationId = medication.id, status = status)
+            MedicationLogEntity(
+                medicationId = medication.id,
+                status = status,
+                loggedAt = loggedAt
+            )
         )
         return LoggedMedication(
             medication = medication,
             logId = logId,
-            status = status
+            status = status,
+            loggedAt = loggedAt
         )
     }
 
@@ -91,6 +97,7 @@ class MedicationRepository(
     data class LoggedMedication(
         val medication: MedicationEntity,
         val logId: Long,
-        val status: String
+        val status: String,
+        val loggedAt: Long
     )
 }
