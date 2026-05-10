@@ -27,16 +27,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,14 +60,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val SAMPLE_MESSAGES = listOf(
-    "I took my BP tablet.",
-    "Did I take my medicine today?",
-    "I feel weak and missed my medicine.",
-    "My granddaughter Ananya's birthday is May 12.",
-    "Call Priya."
-)
-
+/**
+ * Polished Home / chat screen for the demo. Layout, top → bottom:
+ *
+ *   1. Header (title + subtitle)
+ *   2. Local Gemma 4 Edge status card
+ *   3. Trust / safety copy card
+ *   4. Voice section (large mic button)
+ *   5. Manual text field + Send
+ *   6. "Try a demo scenario" buttons (auto-send)
+ *   7. Inline loading / error / pending action cards
+ *   8. Risk badge + assistant-response card
+ *   9. Tool execution card (elder-friendly summary)
+ *  10. Optional developer details (parsed JSON, raw response,
+ *      conversation history) hidden behind a toggle
+ *  11. Demo data controls + section navigation
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -71,6 +87,9 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val recentConversations by viewModel.recentConversations.collectAsState()
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showDeveloperDetails by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -82,28 +101,58 @@ fun HomeScreen(
             context,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
-        // Sync the cached permission state without auto-starting the
-        // recognizer; the elder must still tap the mic button.
         viewModel.setMicPermissionGranted(granted)
+    }
+
+    // Light haptic when listening starts so the elder gets a tactile
+    // "go ahead" cue without needing a chime.
+    LaunchedEffect(uiState.isListening) {
+        if (uiState.isListening) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
+
+    // Light haptic + snackbar nudge when an agent response lands so
+    // the user knows Aasa is about to start speaking.
+    LaunchedEffect(uiState.agentAction?.assistantResponse) {
+        val response = uiState.agentAction?.assistantResponse
+        if (!response.isNullOrBlank()) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
+
+    // Show demo-data reset confirmations + any other transient
+    // messages via the snackbar host.
+    LaunchedEffect(uiState.transientMessageId) {
+        val message = uiState.transientMessage ?: return@LaunchedEffect
+        if (uiState.transientMessageId == 0L) return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.consumeTransientMessage()
     }
 
     Scaffold(
         topBar = {
             TopAppBar(title = { Text(text = "Aasa") })
-        }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "Talk to your local Gemma assistant",
-                style = MaterialTheme.typography.titleMedium
+            HeaderSection()
+
+            GemmaStatusCard(
+                state = uiState.gemmaConnection,
+                modelLabel = uiState.gemmaModelLabel,
+                onRetry = viewModel::pingGemmaServer
             )
+
+            TrustCopyCard()
 
             VoiceSection(
                 uiState = uiState,
@@ -122,28 +171,16 @@ fun HomeScreen(
                 onDismissVoiceError = viewModel::clearVoiceError
             )
 
-            OutlinedTextField(
-                value = uiState.inputText,
-                onValueChange = viewModel::onInputChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Type a message") },
-                placeholder = { Text("e.g. I took my BP tablet.") },
-                enabled = !uiState.isLoading,
-                minLines = 2,
-                maxLines = 4
+            ManualInputSection(
+                inputText = uiState.inputText,
+                isLoading = uiState.isLoading,
+                onChange = viewModel::onInputChange,
+                onSend = viewModel::sendCurrentMessage
             )
 
-            Button(
-                onClick = viewModel::sendCurrentMessage,
-                enabled = !uiState.isLoading && uiState.inputText.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(text = if (uiState.isLoading) "Sending..." else "Send")
-            }
-
-            SampleButtons(
+            DemoScenariosSection(
                 enabled = !uiState.isLoading,
-                onSampleClick = viewModel::sendSample
+                onScenarioClick = viewModel::runDemoScenario
             )
 
             if (uiState.isLoading) {
@@ -168,21 +205,35 @@ fun HomeScreen(
                 onDismiss = viewModel::dismissPendingAction
             )
 
-            if (uiState.toolExecutionSuccess != null) {
-                ToolExecutionCard(
-                    success = uiState.toolExecutionSuccess == true,
-                    message = uiState.toolResultMessage.orEmpty(),
-                    persistedMessage = uiState.persistedToolResultMessage,
-                    data = uiState.toolResultData
+            uiState.agentAction?.let { action ->
+                AssistantResponseCard(
+                    action = action,
+                    riskCopy = uiState.riskCopy
                 )
             }
 
-            uiState.agentAction?.let { action ->
-                ParsedResponseCard(action = action)
-                RawResponseCard(rawResponse = action.rawResponse)
+            if (uiState.toolExecutionSuccess != null) {
+                ToolSummaryCard(
+                    toolName = uiState.agentAction?.tool,
+                    success = uiState.toolExecutionSuccess == true,
+                    message = uiState.toolResultMessage.orEmpty(),
+                    persistedMessage = uiState.persistedToolResultMessage
+                )
             }
 
-            ConversationHistoryCard(conversations = recentConversations)
+            DeveloperDetailsToggle(
+                expanded = showDeveloperDetails,
+                onToggle = { showDeveloperDetails = !showDeveloperDetails }
+            )
+
+            if (showDeveloperDetails) {
+                uiState.agentAction?.let { action ->
+                    ParsedResponseCard(action = action)
+                    RawResponseCard(rawResponse = action.rawResponse)
+                }
+                ToolExecutionDataCard(data = uiState.toolResultData)
+                ConversationHistoryCard(conversations = recentConversations)
+            }
 
             DemoDataControls(
                 isResetting = uiState.isResettingDemoData,
@@ -202,6 +253,246 @@ fun HomeScreen(
 private fun aasaHomeViewModel(): HomeViewModel {
     val application = LocalContext.current.applicationContext as AasaApplication
     return viewModel(factory = HomeViewModel.Factory(application))
+}
+
+// ---------------------------------------------------------------------
+// Header + status + trust copy
+// ---------------------------------------------------------------------
+
+@Composable
+private fun HeaderSection() {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = "Aasa",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "Gemma 4 Safety Agent for Independent Elders",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun GemmaStatusCard(
+    state: GemmaConnectionState,
+    modelLabel: String?,
+    onRetry: () -> Unit
+) {
+    val (statusLabel, dotColor) = when (state) {
+        GemmaConnectionState.CONNECTED ->
+            "Connected" to MaterialTheme.colorScheme.primary
+        GemmaConnectionState.CONNECTING ->
+            "Connecting…" to MaterialTheme.colorScheme.tertiary
+        GemmaConnectionState.DISCONNECTED ->
+            "Disconnected" to MaterialTheme.colorScheme.error
+        GemmaConnectionState.UNKNOWN ->
+            "Checking…" to MaterialTheme.colorScheme.outline
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                StatusDot(color = dotColor)
+                Text(
+                    text = "Gemma 4 Local Edge: $statusLabel",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                if (state == GemmaConnectionState.DISCONNECTED) {
+                    OutlinedButton(onClick = onRetry) { Text("Retry") }
+                }
+            }
+            StatusLine(label = "Mode", value = "Pixel 4a → Mac Local Gemma 4")
+            StatusLine(label = "Privacy", value = "No cloud LLM")
+            modelLabel?.takeIf { it.isNotBlank() }?.let { name ->
+                StatusLine(label = "Model", value = name)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusDot(color: Color) {
+    Box(
+        modifier = Modifier
+            .size(12.dp)
+            .clip(RoundedCornerShape(50))
+            .background(color)
+    )
+}
+
+@Composable
+private fun StatusLine(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(2f)
+        )
+    }
+}
+
+@Composable
+private fun TrustCopyCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "You stay in control",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Text(
+                text = "Aasa will not call or alert anyone automatically. " +
+                    "You choose when to open the dialer or prepare a message.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Manual input + demo scenarios
+// ---------------------------------------------------------------------
+
+@Composable
+private fun ManualInputSection(
+    inputText: String,
+    isLoading: Boolean,
+    onChange: (String) -> Unit,
+    onSend: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = inputText,
+            onValueChange = onChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Type a message", fontSize = 16.sp) },
+            placeholder = { Text("e.g. I took my BP tablet.") },
+            enabled = !isLoading,
+            minLines = 2,
+            maxLines = 4,
+            textStyle = MaterialTheme.typography.bodyLarge
+        )
+        Button(
+            onClick = onSend,
+            enabled = !isLoading && inputText.isNotBlank(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ) {
+            Text(
+                text = if (isLoading) "Sending..." else "Send",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun DemoScenariosSection(
+    enabled: Boolean,
+    onScenarioClick: (DemoScenario) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Try a demo scenario",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Tap any of these to send the phrase to Gemma 4.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            DemoScenarios.ALL.forEach { scenario ->
+                DemoScenarioRow(
+                    scenario = scenario,
+                    enabled = enabled,
+                    onClick = { onScenarioClick(scenario) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DemoScenarioRow(
+    scenario: DemoScenario,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(
+                text = scenario.label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                text = scenario.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -285,9 +576,11 @@ private fun VoiceSection(
         if (uiState.isSpeaking) {
             OutlinedButton(
                 onClick = onStopSpeakingClick,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
             ) {
-                Text(text = "Stop Speaking")
+                Text(text = "Stop Speaking", fontSize = 16.sp)
             }
         }
 
@@ -322,7 +615,7 @@ private fun MicButton(
         enabled = !isDisabled,
         modifier = Modifier
             .fillMaxWidth()
-            .height(88.dp),
+            .height(112.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -330,12 +623,12 @@ private fun MicButton(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             MicGlyph()
             Text(
                 text = label,
-                fontSize = 22.sp,
+                fontSize = 26.sp,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -351,14 +644,14 @@ private fun MicButton(
 private fun MicGlyph() {
     Box(
         modifier = Modifier
-            .size(28.dp)
+            .size(36.dp)
             .clip(RoundedCornerShape(50))
             .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f)),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = "\uD83C\uDFA4",
-            fontSize = 18.sp
+            fontSize = 22.sp
         )
     }
 }
@@ -433,30 +726,157 @@ private fun TtsStatusPill(status: String) {
 }
 
 // ---------------------------------------------------------------------
-// Existing sections (Phase 4) -- unchanged behavior
+// Assistant response + tool summary (elder-friendly)
 // ---------------------------------------------------------------------
 
 @Composable
-private fun SampleButtons(
-    enabled: Boolean,
-    onSampleClick: (String) -> Unit
+private fun AssistantResponseCard(
+    action: AgentAction,
+    riskCopy: RiskCopy?
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Try a sample",
-            style = MaterialTheme.typography.labelLarge
+    if (action.assistantResponse.isBlank() && riskCopy == null) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
         )
-        SAMPLE_MESSAGES.forEach { sample ->
-            OutlinedButton(
-                onClick = { onSampleClick(sample) },
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Aasa says",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            if (action.assistantResponse.isNotBlank()) {
+                Text(
+                    text = action.assistantResponse,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            riskCopy?.let { RiskBadge(copy = it) }
+        }
+    }
+}
+
+@Composable
+private fun ToolSummaryCard(
+    toolName: String?,
+    success: Boolean,
+    message: String,
+    persistedMessage: String?
+) {
+    val container = if (success) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.errorContainer
+    }
+    val onContainer = if (success) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onErrorContainer
+    }
+    val displayName = humanizeTool(toolName)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = sample)
+                Text(
+                    text = displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onContainer,
+                    modifier = Modifier.weight(1f)
+                )
+                StatusBadge(success = success)
+                if (persistedMessage != null) {
+                    PersistedPill()
+                }
+            }
+            Text(
+                text = message.ifBlank { "(no summary)" },
+                style = MaterialTheme.typography.bodyLarge,
+                color = onContainer
+            )
+            persistedMessage?.let {
+                Text(
+                    text = "Saved on this phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = onContainer
+                )
             }
         }
     }
 }
+
+@Composable
+private fun StatusBadge(success: Boolean) {
+    val (label, container, content) = if (success) {
+        Triple("Success", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary)
+    } else {
+        Triple("Failed", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.onError)
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(container)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = content,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun PersistedPill() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = "Saved on device",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer
+        )
+    }
+}
+
+private fun humanizeTool(rawTool: String?): String {
+    val cleaned = rawTool?.trim().orEmpty()
+    if (cleaned.isBlank()) return "Aasa response"
+    return when (cleaned.uppercase()) {
+        "MEDICATION", "MEDICATIONTOOL" -> "MedicationTool"
+        "MEMORY", "MEMORYTOOL" -> "MemoryTool"
+        "SAFETY", "SAFETYTOOL" -> "SafetyTool"
+        "TRUSTEDCONTACT", "TRUSTEDCONTACTTOOL" -> "TrustedContactTool"
+        "REMINDER", "REMINDERTOOL" -> "ReminderTool"
+        "CHAT", "CHATTOOL" -> "ChatTool"
+        else -> cleaned
+    }
+}
+
+// ---------------------------------------------------------------------
+// Loading + error
+// ---------------------------------------------------------------------
 
 @Composable
 private fun LoadingRow() {
@@ -466,7 +886,10 @@ private fun LoadingRow() {
         verticalAlignment = Alignment.CenterVertically
     ) {
         CircularProgressIndicator(modifier = Modifier.size(20.dp))
-        Text(text = "Talking to local Gemma…")
+        Text(
+            text = "Talking to local Gemma 4…",
+            style = MaterialTheme.typography.bodyLarge
+        )
     }
 }
 
@@ -497,85 +920,21 @@ private fun ErrorCard(message: String, onDismiss: () -> Unit) {
     }
 }
 
+// ---------------------------------------------------------------------
+// Developer details (collapsible)
+// ---------------------------------------------------------------------
+
 @Composable
-private fun ToolExecutionCard(
-    success: Boolean,
-    message: String,
-    persistedMessage: String?,
-    data: Map<String, Any?>
+private fun DeveloperDetailsToggle(
+    expanded: Boolean,
+    onToggle: () -> Unit
 ) {
-    val container = if (success) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.errorContainer
-    }
-    val onContainer = if (success) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onErrorContainer
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = container)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Tool execution result",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = onContainer
-                )
-                if (persistedMessage != null) {
-                    PersistedPill()
-                }
-            }
-            LabeledLine(
-                label = "Success",
-                value = success.toString(),
-                valueColor = onContainer
-            )
-            LabeledLine(
-                label = "Message",
-                value = message.ifBlank { "(no message)" },
-                valueColor = onContainer
-            )
-            persistedMessage?.let {
-                LabeledLine(
-                    label = "Persisted to Room",
-                    value = it,
-                    valueColor = onContainer
-                )
-            }
-            LabeledLine(
-                label = "Data",
-                value = if (data.isEmpty()) "{}" else prettyPrintJson(data),
-                monospace = true,
-                valueColor = onContainer
-            )
-        }
-    }
-}
-
-@Composable
-private fun PersistedPill() {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.tertiaryContainer)
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+    OutlinedButton(
+        onClick = onToggle,
+        modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = "Saved in Room",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onTertiaryContainer
+            text = if (expanded) "Hide developer details" else "Show developer details"
         )
     }
 }
@@ -628,6 +987,27 @@ private fun RawResponseCard(rawResponse: String?) {
             Text(
                 text = rawResponse?.takeIf { it.isNotBlank() }
                     ?: "(server returned no rawResponse field)",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolExecutionDataCard(data: Map<String, Any?>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Tool execution data",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = if (data.isEmpty()) "{}" else prettyPrintJson(data),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -711,6 +1091,10 @@ private fun roleColor(role: String) = when (role) {
     else -> MaterialTheme.colorScheme.surfaceVariant
 }
 
+// ---------------------------------------------------------------------
+// Demo data + navigation
+// ---------------------------------------------------------------------
+
 @Composable
 private fun DemoDataControls(
     isResetting: Boolean,
@@ -732,16 +1116,22 @@ private fun DemoDataControls(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Wipes all medications, memories, contacts and conversations from Room and re-seeds the BP tablet, Priya, and favorite-music memory.",
+                text = "Wipes medications, memories, contacts, and conversations from this phone, then re-seeds the BP tablet, Priya, and the favorite-music memory.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OutlinedButton(
+            Button(
                 onClick = onResetClick,
                 enabled = !isResetting,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
             ) {
-                Text(text = if (isResetting) "Resetting..." else "Reset demo data")
+                Text(
+                    text = if (isResetting) "Resetting..." else "Reset Demo Data",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -752,7 +1142,7 @@ private fun LabeledLine(
     label: String,
     value: String,
     monospace: Boolean = false,
-    valueColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
@@ -775,25 +1165,36 @@ private fun NavigationShortcuts(
     onMemoryClick: () -> Unit,
     onTrustedCircleClick: () -> Unit
 ) {
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Text(
                 text = "Sections",
-                style = MaterialTheme.typography.labelLarge
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
             )
-            OutlinedButton(
-                onClick = onMedicationClick,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(text = "Medication") }
-            OutlinedButton(
-                onClick = onMemoryClick,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(text = "Memory") }
-            OutlinedButton(
-                onClick = onTrustedCircleClick,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(text = "Trusted Circle") }
+            BigSectionButton(label = "Medication", onClick = onMedicationClick)
+            BigSectionButton(label = "Memory", onClick = onMemoryClick)
+            BigSectionButton(label = "Trusted Circle", onClick = onTrustedCircleClick)
         }
+    }
+}
+
+@Composable
+private fun BigSectionButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 

@@ -7,6 +7,8 @@ import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.repository.ConversationRepository
+import com.aasa.eldercare.network.ApiService
+import com.aasa.eldercare.network.RetrofitClient
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
 import com.aasa.eldercare.tools.ToolResultKeys
@@ -14,11 +16,13 @@ import com.aasa.eldercare.voice.SpeechEvent
 import com.aasa.eldercare.voice.SpeechToTextManager
 import com.aasa.eldercare.voice.TextToSpeechManager
 import com.aasa.eldercare.voice.TtsEvent
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -31,17 +35,19 @@ import kotlinx.coroutines.launch
  *    after each successful turn.
  *  - the existing Phase 4 conversation flow against [orchestrator]
  *    and [conversationRepository], which is unchanged.
+ *  - a periodic Gemma-server health probe that keeps the status card
+ *    in sync (Phase 8).
  *
  * Lifecycle: both voice managers are released in [onCleared]. The
- * STT and TTS event flows are collected once during init() with
- * [viewModelScope]; the [SpeechToTextManager] uses replay = 0 so we
- * do not need to track subscription state.
+ * STT and TTS event flows, plus the health probe, are collected once
+ * during init() with [viewModelScope].
  */
 class HomeViewModel(
     private val orchestrator: AgentOrchestrator,
     private val conversationRepository: ConversationRepository,
     private val speechToTextManager: SpeechToTextManager,
     private val textToSpeechManager: TextToSpeechManager,
+    private val apiService: ApiService,
     private val resetDemoDataAction: suspend () -> Unit
 ) : ViewModel() {
 
@@ -60,6 +66,7 @@ class HomeViewModel(
     init {
         observeSpeechEvents()
         observeTtsEvents()
+        startHealthProbe()
     }
 
     // ---------------------------------------------------------------
@@ -73,6 +80,15 @@ class HomeViewModel(
     fun sendSample(message: String) {
         _uiState.value = _uiState.value.copy(inputText = message)
         sendCurrentMessage()
+    }
+
+    /**
+     * Phase 8 demo affordance: fill the input *and* immediately fire
+     * the agent turn so a 3-minute demo doesn't have to type and
+     * tap separately. Mirrors [sendSample] but takes a typed scenario.
+     */
+    fun runDemoScenario(scenario: DemoScenario) {
+        sendSample(scenario.message)
     }
 
     fun sendCurrentMessage() {
@@ -116,7 +132,9 @@ class HomeViewModel(
                         pendingContactName = pending.contactName,
                         pendingPhoneNumber = pending.phoneNumber,
                         pendingAlertMessage = pending.alertMessage,
-                        pendingEmergencyNumber = pending.emergencyNumber
+                        pendingEmergencyNumber = pending.emergencyNumber,
+                        // Successful turn = server is reachable.
+                        gemmaConnection = GemmaConnectionState.CONNECTED
                     )
                     val spoken = result.action.assistantResponse
                         .ifBlank { result.toolResult.message }
@@ -137,7 +155,10 @@ class HomeViewModel(
                         pendingContactName = null,
                         pendingPhoneNumber = null,
                         pendingAlertMessage = null,
-                        pendingEmergencyNumber = null
+                        pendingEmergencyNumber = null,
+                        // Failed network round-trip = mark disconnected
+                        // so the status card reflects reality.
+                        gemmaConnection = GemmaConnectionState.DISCONNECTED
                     )
                 }
         }
@@ -198,6 +219,26 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isResettingDemoData = true)
             runCatching { resetDemoDataAction() }
+                .onSuccess {
+                    // Wipe the response cards so the UI reflects the
+                    // freshly-seeded DB right away.
+                    _uiState.value = _uiState.value.copy(
+                        agentAction = null,
+                        toolExecutionSuccess = null,
+                        toolResultMessage = null,
+                        toolResultData = emptyMap(),
+                        persistedToolResultMessage = null,
+                        pendingActionType = null,
+                        pendingContactName = null,
+                        pendingPhoneNumber = null,
+                        pendingAlertMessage = null,
+                        pendingEmergencyNumber = null,
+                        recognizedSpeech = null,
+                        errorMessage = null,
+                        voiceError = null
+                    )
+                    publishTransientMessage("Demo data reset.")
+                }
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Failed to reset demo data: ${error.toReadableMessage()}"
@@ -205,6 +246,21 @@ class HomeViewModel(
                 }
             _uiState.value = _uiState.value.copy(isResettingDemoData = false)
         }
+    }
+
+    /**
+     * Acknowledge the snackbar fired by the screen so it doesn't
+     * re-trigger after a configuration change.
+     */
+    fun consumeTransientMessage() {
+        _uiState.value = _uiState.value.copy(transientMessage = null)
+    }
+
+    private fun publishTransientMessage(message: String) {
+        _uiState.value = _uiState.value.copy(
+            transientMessage = message,
+            transientMessageId = _uiState.value.transientMessageId + 1
+        )
     }
 
     // ---------------------------------------------------------------
@@ -341,6 +397,57 @@ class HomeViewModel(
         }
     }
 
+    // ---------------------------------------------------------------
+    // Phase 8: local Gemma 4 health probe.
+    // ---------------------------------------------------------------
+
+    /**
+     * Periodically ping the Gemma bridge `/health` endpoint so the
+     * status card stays accurate even before the elder sends their
+     * first message. The probe loop terminates with [viewModelScope].
+     */
+    private fun startHealthProbe() {
+        viewModelScope.launch {
+            while (isActive) {
+                pingGemmaServerInternal()
+                delay(HEALTH_PROBE_INTERVAL_MS)
+            }
+        }
+    }
+
+    /** Manually re-probe (used by the "Retry" button on the status card). */
+    fun pingGemmaServer() {
+        viewModelScope.launch { pingGemmaServerInternal() }
+    }
+
+    private suspend fun pingGemmaServerInternal() {
+        // Don't downgrade to CONNECTING if we're already CONNECTED
+        // - that would briefly flicker the badge on every probe.
+        if (_uiState.value.gemmaConnection == GemmaConnectionState.UNKNOWN) {
+            _uiState.value = _uiState.value.copy(
+                gemmaConnection = GemmaConnectionState.CONNECTING
+            )
+        }
+        runCatching { apiService.checkServer() }
+            .onSuccess { response ->
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(
+                        gemmaConnection = GemmaConnectionState.CONNECTED,
+                        gemmaModelLabel = response.body()?.ollamaModel
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        gemmaConnection = GemmaConnectionState.DISCONNECTED
+                    )
+                }
+            }
+            .onFailure {
+                _uiState.value = _uiState.value.copy(
+                    gemmaConnection = GemmaConnectionState.DISCONNECTED
+                )
+            }
+    }
+
     override fun onCleared() {
         speechToTextManager.destroy()
         textToSpeechManager.shutdown()
@@ -369,8 +476,13 @@ class HomeViewModel(
                 conversationRepository = application.conversationRepository,
                 speechToTextManager = SpeechToTextManager(application.applicationContext),
                 textToSpeechManager = TextToSpeechManager(application.applicationContext),
+                apiService = RetrofitClient.apiService,
                 resetDemoDataAction = { application.resetDemoData() }
             ) as T
         }
+    }
+
+    private companion object {
+        const val HEALTH_PROBE_INTERVAL_MS = 15_000L
     }
 }

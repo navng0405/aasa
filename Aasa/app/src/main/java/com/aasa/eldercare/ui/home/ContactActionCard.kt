@@ -42,20 +42,25 @@ fun ContactActionCard(
         ) {
             Text(
                 text = "Call ${contactName ?: "trusted contact"}?",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                text = "Aasa prepared this action. You decide whether to continue.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             phoneNumber?.takeIf { it.isNotBlank() }?.let { number ->
                 Text(
                     text = number,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
             Text(
                 text = "Aasa will not call automatically. The dialer opens with the number pre-filled.",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Row(

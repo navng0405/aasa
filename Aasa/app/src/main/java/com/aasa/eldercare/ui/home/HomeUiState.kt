@@ -6,24 +6,15 @@ import com.aasa.eldercare.tools.ToolActionTypes
 /**
  * Single source of truth for the Home / chat screen.
  *
- * Phase 4 surfaced:
- *  - the Gemma decision ([agentAction])
- *  - the live tool execution outcome ([toolExecutionSuccess],
- *    [toolResultMessage], [toolResultData])
- *  - a redundant [persistedToolResultMessage] that is only populated
- *    when the tool actually wrote to Room, so the UI can show a
- *    "Persisted in Room" pill the user can trust.
+ * Phase 4 surfaced the Gemma decision and tool execution outcome.
+ * Phase 6 added voice-first state. Phase 7 added deferred-confirmation
+ * pending-action fields. Phase 8 adds:
+ *  - [gemmaConnection] / [gemmaModelLabel] for the "Local Gemma 4
+ *    Edge: Connected" status card.
+ *  - [transientMessage] for one-shot snackbar copy ("Demo data reset.").
  *
- * Phase 6 adds voice-first state:
- *  - [isListening]: the SpeechRecognizer is actively listening.
- *  - [isSpeaking]: TextToSpeech is reading the assistant response.
- *  - [recognizedSpeech]: latest partial / final transcript so the
- *    elder can see what the device thinks they said.
- *  - [voiceError]: human-readable last voice / TTS error.
- *  - [ttsStatus]: long-lived informational message about the TTS
- *    engine (e.g. "language not supported").
- *  - [hasMicPermission]: mirrors RECORD_AUDIO so the UI can switch
- *    the mic button into a "request permission" affordance.
+ * Risk semantics are derived from [agentAction]?.riskLevel via
+ * [riskCopy] so the UI never has to know about risk strings.
  */
 data class HomeUiState(
     val inputText: String = "",
@@ -42,18 +33,24 @@ data class HomeUiState(
     val ttsStatus: String? = null,
     val hasMicPermission: Boolean = false,
 
-    /**
-     * Phase 7 deferred-confirmation action payload. Populated from the
-     * latest tool result whenever the tool returned an `actionType`
-     * recognized by [com.aasa.eldercare.tools.ToolActionTypes]. The UI
-     * uses these fields to render contact / safety / emergency action
-     * cards.
-     */
+    /** Phase 7 deferred-confirmation action payload. */
     val pendingActionType: String? = null,
     val pendingContactName: String? = null,
     val pendingPhoneNumber: String? = null,
     val pendingAlertMessage: String? = null,
-    val pendingEmergencyNumber: String? = null
+    val pendingEmergencyNumber: String? = null,
+
+    /** Phase 8: local Gemma 4 server health. */
+    val gemmaConnection: GemmaConnectionState = GemmaConnectionState.UNKNOWN,
+    val gemmaModelLabel: String? = null,
+
+    /**
+     * Phase 8: one-shot snackbar text, e.g. "Demo data reset.". The
+     * screen launches a side effect on [transientMessageId] changes
+     * and then calls [HomeViewModel.consumeTransientMessage].
+     */
+    val transientMessage: String? = null,
+    val transientMessageId: Long = 0L
 ) {
     val showContactActionCard: Boolean
         get() = pendingActionType == ToolActionTypes.CALL_CONTACT &&
@@ -65,4 +62,52 @@ data class HomeUiState(
 
     val showEmergencyActionCard: Boolean
         get() = pendingActionType == ToolActionTypes.HIGH_RISK_SAFETY
+
+    val riskCopy: RiskCopy?
+        get() = agentAction?.riskLevel?.let { RiskCopy.fromRaw(it) }
+}
+
+/**
+ * Coarse local view of the Gemma 4 bridge health. Driven by periodic
+ * health pings from [HomeViewModel]; the UI maps each value to a
+ * label in the status card.
+ */
+enum class GemmaConnectionState {
+    UNKNOWN,
+    CONNECTING,
+    CONNECTED,
+    DISCONNECTED
+}
+
+/**
+ * Elder-friendly mapping of Gemma's raw risk string ("LOW" / "MEDIUM"
+ * / "HIGH") into a short label and an explanation. Anything we don't
+ * recognize maps to LOW so the UI still has something safe to show.
+ */
+data class RiskCopy(
+    val level: RiskLevel,
+    val label: String,
+    val explanation: String
+) {
+    enum class RiskLevel { LOW, MEDIUM, HIGH }
+
+    companion object {
+        fun fromRaw(raw: String): RiskCopy = when (raw.trim().uppercase()) {
+            "HIGH" -> RiskCopy(
+                level = RiskLevel.HIGH,
+                label = "Urgent safety concern",
+                explanation = "This may need urgent help."
+            )
+            "MEDIUM" -> RiskCopy(
+                level = RiskLevel.MEDIUM,
+                label = "Possible safety concern",
+                explanation = "Aasa noticed something that may need a check-in."
+            )
+            else -> RiskCopy(
+                level = RiskLevel.LOW,
+                label = "Low risk",
+                explanation = "Normal request."
+            )
+        }
+    }
 }

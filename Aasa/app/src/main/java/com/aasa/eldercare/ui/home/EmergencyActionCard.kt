@@ -49,17 +49,23 @@ fun EmergencyActionCard(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "High Safety Concern",
-                style = MaterialTheme.typography.titleLarge,
+                text = "Urgent Safety Concern",
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
             Text(
-                text = alertMessage?.takeIf { it.isNotBlank() }
-                    ?: "Consider contacting emergency help or a trusted contact.",
+                text = "This may need immediate help. You can open the emergency dialer or call ${contactName ?: "your trusted contact"}.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
+            alertMessage?.takeIf { it.isNotBlank() }?.let { body ->
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
             Text(
                 text = "Aasa will not call anyone automatically. You must confirm in the dialer.",
                 style = MaterialTheme.typography.bodySmall,

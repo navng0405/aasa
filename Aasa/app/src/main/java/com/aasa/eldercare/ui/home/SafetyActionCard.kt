@@ -41,8 +41,13 @@ fun SafetyActionCard(
         ) {
             Text(
                 text = "Alert ${contactName ?: "trusted contact"}?",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                text = "Aasa noticed a possible safety concern. You stay in control.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
             alertMessage?.takeIf { it.isNotBlank() }?.let { body ->
@@ -54,7 +59,7 @@ fun SafetyActionCard(
             }
             Text(
                 text = "Aasa will not send anything automatically. The SMS app opens with the message pre-filled.",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
             Row(
