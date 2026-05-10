@@ -156,6 +156,35 @@ object IntentKeywords {
         return MEMORY_SAVE_TRIGGERS.any { lower.contains(it) }
     }
 
+    // ----------------------------------------------------------------
+    // Mobility Shield intent (Phase 8.7)
+    // ----------------------------------------------------------------
+
+    /**
+     * Recognize the synthetic prompt the Mobility Shield screen sends
+     * to the orchestrator after a 10-second walk check (or after the
+     * "Simulate Stable / Unsteady Walk" buttons). Matching is
+     * intentionally permissive — anything that mentions a "mobility
+     * check", a 10-second walk check, or a motion-feature summary
+     * counts. Substring matches against a lowercased view.
+     */
+    private val MOBILITY_CHECK_TRIGGERS: List<String> = listOf(
+        "mobility check completed",
+        "mobility check complete",
+        "mobility check result",
+        "10-second walk check",
+        "ten-second walk check",
+        "10 second walk check",
+        "analyze this 10-second motion summary",
+        "analyze this motion summary",
+        "mobilityconfidencescore"
+    )
+
+    fun isMobilityCheckRequest(text: String): Boolean {
+        val lower = text.lowercase()
+        return MOBILITY_CHECK_TRIGGERS.any { lower.contains(it) }
+    }
+
     /**
      * Best-effort coarse type for a memory derived from the raw user
      * message – used by [com.aasa.eldercare.tools.MemoryTool] when

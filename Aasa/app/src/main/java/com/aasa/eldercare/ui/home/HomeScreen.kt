@@ -84,6 +84,7 @@ fun HomeScreen(
     onTrustedCircleClick: () -> Unit,
     onScamShieldClick: () -> Unit,
     onFallTriageClick: () -> Unit,
+    onMobilityShieldClick: () -> Unit,
     viewModel: HomeViewModel = aasaHomeViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -159,6 +160,8 @@ fun HomeScreen(
             ScamShieldEntryCard(onOpen = onScamShieldClick)
 
             FallTriageEntryCard(onOpen = onFallTriageClick)
+
+            MobilityShieldEntryCard(onOpen = onMobilityShieldClick)
 
             VoiceSection(
                 uiState = uiState,
@@ -252,7 +255,8 @@ fun HomeScreen(
                 onMemoryClick = onMemoryClick,
                 onTrustedCircleClick = onTrustedCircleClick,
                 onScamShieldClick = onScamShieldClick,
-                onFallTriageClick = onFallTriageClick
+                onFallTriageClick = onFallTriageClick,
+                onMobilityShieldClick = onMobilityShieldClick
             )
         }
     }
@@ -894,6 +898,9 @@ private fun humanizeTool(rawTool: String?): String {
         "TRUSTEDCONTACT", "TRUSTEDCONTACTTOOL" -> "TrustedContactTool"
         "REMINDER", "REMINDERTOOL" -> "ReminderTool"
         "CHAT", "CHATTOOL" -> "ChatTool"
+        "SCAMSHIELD", "SCAMSHIELDTOOL" -> "ScamShieldTool"
+        "FALLTRIAGE", "FALLTRIAGETOOL" -> "FallTriageTool"
+        "MOBILITYSHIELD", "MOBILITYSHIELDTOOL" -> "MobilityShieldTool"
         else -> cleaned
     }
 }
@@ -1189,7 +1196,8 @@ private fun NavigationShortcuts(
     onMemoryClick: () -> Unit,
     onTrustedCircleClick: () -> Unit,
     onScamShieldClick: () -> Unit,
-    onFallTriageClick: () -> Unit
+    onFallTriageClick: () -> Unit,
+    onMobilityShieldClick: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -1206,6 +1214,7 @@ private fun NavigationShortcuts(
             BigSectionButton(label = "Trusted Circle", onClick = onTrustedCircleClick)
             BigSectionButton(label = "Scam & Fraud Shield", onClick = onScamShieldClick)
             BigSectionButton(label = "Fall Detection & Triage", onClick = onFallTriageClick)
+            BigSectionButton(label = "Mobility Shield", onClick = onMobilityShieldClick)
         }
     }
 }
@@ -1229,6 +1238,55 @@ private fun BigSectionButton(label: String, onClick: () -> Unit) {
 // ---------------------------------------------------------------------
 // Phase 8.5 Scam & Fraud Shield (Home surface)
 // ---------------------------------------------------------------------
+
+/**
+ * Prominent entry card for the Mobility Shield (10-second walk check)
+ * screen. Mirrors [FallTriageEntryCard]'s elder-friendly tone — large
+ * title, plain subtitle, single big tap target.
+ *
+ * The copy here intentionally avoids any medical or diagnostic
+ * language. Aasa "tracks mobility confidence" — it does NOT diagnose
+ * Parkinson's, dementia, stroke, or any neurological disease.
+ */
+@Composable
+private fun MobilityShieldEntryCard(onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Mobility Shield",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                text = "Run a 10-second walk check. Aasa explains mobility confidence " +
+                    "in simple words — this is not a medical diagnosis.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Button(
+                onClick = onOpen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = "Open Mobility Shield",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
 
 /**
  * Prominent entry card for the Fall Detection & Triage screen. Mirrors

@@ -78,6 +78,21 @@ class AgentOrchestrator(
         val enrichedArgs = action.arguments + mapOf("userMessage" to userMessage)
 
         return when {
+            // --- 0a. Mobility check (highest non-fall priority) --------
+            // Synthetic prompts that come from the Mobility Shield
+            // screen (real walk check + simulate buttons) must always
+            // route through MobilityShieldTool, even when Gemma
+            // misclassifies the gentle wording as CHAT or SAFETY.
+            // This must run before SafetyKeywords because the alert
+            // body intentionally mentions "feel weak" or "unsteady",
+            // which would otherwise trip a MEDIUM safety override.
+            IntentKeywords.isMobilityCheckRequest(userMessage) -> action.copy(
+                intent = INTENT_MOBILITY_CHECK,
+                tool = ToolNames.MOBILITY_SHIELD,
+                riskLevel = action.riskLevel.ifBlank { RISK_LOW },
+                arguments = enrichedArgs
+            )
+
             // --- 0. Fall triage (highest priority) ----------------------
             // Synthetic prompts that begin with "Fall detected." come
             // straight from the FallTriage screen and must always run
@@ -179,6 +194,7 @@ class AgentOrchestrator(
         private const val INTENT_SAVE_MEMORY = "SAVE_MEMORY"
         private const val INTENT_ANALYZE_SCAM = "ANALYZE_SCAM"
         private const val INTENT_FALL_TRIAGE = "FALL_TRIAGE"
+        private const val INTENT_MOBILITY_CHECK = "MOBILITY_CHECK"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"

@@ -53,6 +53,19 @@ object ToolResultKeys {
     const val USER_RESPONSE = "userResponse"
     const val FALL_DETECTED = "fallDetected"
     const val RECOMMENDED_ACTION = "recommendedAction"
+
+    // Mobility Shield (Phase 8.7)
+    const val MOBILITY_CONFIDENCE_SCORE = "mobilityConfidenceScore"
+    const val STABILITY_LABEL = "stabilityLabel"
+    const val FEATURE_SUMMARY = "featureSummary"
+    const val AVERAGE_ACCELERATION = "averageAcceleration"
+    const val ACCELERATION_VARIANCE = "accelerationVariance"
+    const val PEAK_ACCELERATION = "peakAcceleration"
+    const val SIDE_TO_SIDE_SWAY = "sideToSideSway"
+    const val SIDE_TO_SIDE_SWAY_SCORE = "sideToSideSwayScore"
+    const val ABRUPT_PAUSES = "abruptPauses"
+    const val SMOOTHNESS_SCORE = "smoothnessScore"
+    const val DURATION_SECONDS = "durationSeconds"
 }
 
 /**
@@ -66,6 +79,7 @@ object ToolActionTypes {
     const val HIGH_RISK_SAFETY = "HIGH_RISK_SAFETY"
     const val SCAM_ANALYSIS = "SCAM_ANALYSIS"
     const val FALL_TRIAGE = "FALL_TRIAGE"
+    const val MOBILITY_CHECK = "MOBILITY_CHECK"
 }
 
 /**
