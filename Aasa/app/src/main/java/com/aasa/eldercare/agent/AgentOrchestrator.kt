@@ -2,6 +2,7 @@ package com.aasa.eldercare.agent
 
 import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.model.ModelRunner
+import com.aasa.eldercare.tools.FallTriageKeywords
 import com.aasa.eldercare.tools.IntentKeywords
 import com.aasa.eldercare.tools.SafetyKeywords
 import com.aasa.eldercare.tools.ScamKeywords
@@ -16,6 +17,8 @@ import com.aasa.eldercare.tools.ToolRegistry
  *   2. Send the message to the local Gemma bridge via [ModelRunner].
  *   3. Convert the network DTO into a domain [AgentAction].
      *   4. Apply *deterministic overrides* on the user message:
+ *        - "Fall detected. User response: …"
+ *                                          -> FallTriageTool / FALL_TRIAGE
  *        - emergency / symptom phrases     -> SafetyTool (HIGH / MEDIUM)
  *        - "analyze this suspicious message:" or HIGH-weight scam
  *          keywords (gift card, OTP, wire transfer, threat language)
@@ -75,7 +78,33 @@ class AgentOrchestrator(
         val enrichedArgs = action.arguments + mapOf("userMessage" to userMessage)
 
         return when {
-            // --- 1. Safety overrides (highest priority) -----------------
+            // --- 0. Fall triage (highest priority) ----------------------
+            // Synthetic prompts that begin with "Fall detected." come
+            // straight from the FallTriage screen and must always run
+            // through FallTriageTool, even when the spoken response
+            // contains "I cannot breathe" (which would otherwise route
+            // to SafetyTool). FallTriageTool surfaces the same
+            // emergency action card semantics for URGENT_RISK.
+            FallTriageKeywords.isFallTriageRequest(userMessage) -> {
+                val response = FallTriageKeywords.extractUserResponse(userMessage)
+                val deterministicCategory =
+                    FallTriageKeywords.classify(response.takeIf { it.isNotBlank() })
+                action.copy(
+                    intent = INTENT_FALL_TRIAGE,
+                    tool = ToolNames.FALL_TRIAGE,
+                    riskLevel = action.riskLevel.ifBlank {
+                        FallTriageKeywords.riskFor(deterministicCategory)
+                    },
+                    arguments = enrichedArgs + mapOf(
+                        "userResponse" to response,
+                        "fallDetected" to true,
+                        "triageCategory" to (action.arguments["triageCategory"]
+                            ?: deterministicCategory)
+                    )
+                )
+            }
+
+            // --- 1. Safety overrides ------------------------------------
             SafetyKeywords.containsHighRiskPhrase(userMessage) -> action.copy(
                 intent = INTENT_SAFETY_CHECK,
                 tool = ToolNames.SAFETY,
@@ -149,6 +178,7 @@ class AgentOrchestrator(
         private const val INTENT_LOG_MEDICATION = "LOG_MEDICATION"
         private const val INTENT_SAVE_MEMORY = "SAVE_MEMORY"
         private const val INTENT_ANALYZE_SCAM = "ANALYZE_SCAM"
+        private const val INTENT_FALL_TRIAGE = "FALL_TRIAGE"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"

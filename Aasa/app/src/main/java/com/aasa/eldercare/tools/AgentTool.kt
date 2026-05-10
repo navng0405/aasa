@@ -25,4 +25,5 @@ object ToolNames {
     const val TRUSTED_CONTACT = "TrustedContactTool"
     const val REMINDER = "ReminderTool"
     const val SCAM_SHIELD = "ScamShieldTool"
+    const val FALL_TRIAGE = "FallTriageTool"
 }

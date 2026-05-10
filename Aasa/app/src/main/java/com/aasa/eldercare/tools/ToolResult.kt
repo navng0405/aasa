@@ -46,6 +46,13 @@ object ToolResultKeys {
     const val SCAM_RISK = "scamRisk"
     const val SCAM_SIGNALS = "scamSignals"
     const val SAFE_ACTION = "safeAction"
+
+    // Fall Triage (Phase 8.6)
+    const val TRIAGE_CATEGORY = "triageCategory"
+    const val TRIAGE_REASON = "triageReason"
+    const val USER_RESPONSE = "userResponse"
+    const val FALL_DETECTED = "fallDetected"
+    const val RECOMMENDED_ACTION = "recommendedAction"
 }
 
 /**
@@ -58,4 +65,17 @@ object ToolActionTypes {
     const val ALERT_TRUSTED_CONTACT = "ALERT_TRUSTED_CONTACT"
     const val HIGH_RISK_SAFETY = "HIGH_RISK_SAFETY"
     const val SCAM_ANALYSIS = "SCAM_ANALYSIS"
+    const val FALL_TRIAGE = "FALL_TRIAGE"
+}
+
+/**
+ * Triage categories for [com.aasa.eldercare.tools.FallTriageTool]
+ * (Phase 8.6). Kept as plain string constants so the JSON contract
+ * with Gemma stays simple.
+ */
+object FallTriageCategories {
+    const val FALSE_ALARM = "FALSE_ALARM"
+    const val NON_EMERGENCY_INJURY = "NON_EMERGENCY_INJURY"
+    const val URGENT_RISK = "URGENT_RISK"
+    const val NO_RESPONSE = "NO_RESPONSE"
 }

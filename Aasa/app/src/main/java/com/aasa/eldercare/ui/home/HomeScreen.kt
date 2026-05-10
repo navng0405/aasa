@@ -83,6 +83,7 @@ fun HomeScreen(
     onMemoryClick: () -> Unit,
     onTrustedCircleClick: () -> Unit,
     onScamShieldClick: () -> Unit,
+    onFallTriageClick: () -> Unit,
     viewModel: HomeViewModel = aasaHomeViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -156,6 +157,8 @@ fun HomeScreen(
             TrustCopyCard()
 
             ScamShieldEntryCard(onOpen = onScamShieldClick)
+
+            FallTriageEntryCard(onOpen = onFallTriageClick)
 
             VoiceSection(
                 uiState = uiState,
@@ -248,7 +251,8 @@ fun HomeScreen(
                 onMedicationClick = onMedicationClick,
                 onMemoryClick = onMemoryClick,
                 onTrustedCircleClick = onTrustedCircleClick,
-                onScamShieldClick = onScamShieldClick
+                onScamShieldClick = onScamShieldClick,
+                onFallTriageClick = onFallTriageClick
             )
         }
     }
@@ -1184,7 +1188,8 @@ private fun NavigationShortcuts(
     onMedicationClick: () -> Unit,
     onMemoryClick: () -> Unit,
     onTrustedCircleClick: () -> Unit,
-    onScamShieldClick: () -> Unit
+    onScamShieldClick: () -> Unit,
+    onFallTriageClick: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -1200,6 +1205,7 @@ private fun NavigationShortcuts(
             BigSectionButton(label = "Memory", onClick = onMemoryClick)
             BigSectionButton(label = "Trusted Circle", onClick = onTrustedCircleClick)
             BigSectionButton(label = "Scam & Fraud Shield", onClick = onScamShieldClick)
+            BigSectionButton(label = "Fall Detection & Triage", onClick = onFallTriageClick)
         }
     }
 }
@@ -1223,6 +1229,50 @@ private fun BigSectionButton(label: String, onClick: () -> Unit) {
 // ---------------------------------------------------------------------
 // Phase 8.5 Scam & Fraud Shield (Home surface)
 // ---------------------------------------------------------------------
+
+/**
+ * Prominent entry card for the Fall Detection & Triage screen. Mirrors
+ * [ScamShieldEntryCard]'s elder-friendly tone — large title, plain
+ * subtitle, single big tap target.
+ */
+@Composable
+private fun FallTriageEntryCard(onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Fall Detection & Triage",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                text = "Check in after a possible fall and alert your trusted circle if needed.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Button(
+                onClick = onOpen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = "Open Fall Triage",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
 
 /**
  * Prominent entry card encouraging the elder to open the dedicated
