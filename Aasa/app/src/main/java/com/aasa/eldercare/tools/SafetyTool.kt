@@ -7,17 +7,25 @@ import com.aasa.eldercare.agent.AgentAction
  * keyword-based check on the user message / assistant response /
  * arguments. We deliberately *do not* diagnose – we only describe the
  * risk level and suggest the next step.
+ *
+ * Phrase lists live in [SafetyKeywords] so the orchestrator and this
+ * tool can never disagree.
  */
 class SafetyTool : AgentTool {
     override val name: String = ToolNames.SAFETY
 
     override suspend fun execute(action: AgentAction): ToolResult {
-        val haystack = buildHaystack(action).lowercase()
-        val containsHighRiskPhrase = HIGH_RISK_PHRASES.any { haystack.contains(it) }
+        val haystack = buildHaystack(action)
+        val containsHigh = SafetyKeywords.containsHighRiskPhrase(haystack)
+        val containsMedium = SafetyKeywords.containsMediumRiskPhrase(haystack)
+        val baseRisk = action.riskLevel.uppercase()
 
+        // Risk aggregation: take the *worst* of (deterministic phrase
+        // scan, Gemma's risk level). We never downgrade.
         val effectiveRisk = when {
-            containsHighRiskPhrase -> RISK_HIGH
-            else -> action.riskLevel.uppercase()
+            containsHigh || baseRisk == RISK_HIGH -> RISK_HIGH
+            containsMedium || baseRisk == RISK_MEDIUM -> RISK_MEDIUM
+            else -> baseRisk
         }
 
         val message = when (effectiveRisk) {
@@ -34,7 +42,8 @@ class SafetyTool : AgentTool {
             data = mapOf(
                 "originalRiskLevel" to action.riskLevel,
                 "effectiveRiskLevel" to effectiveRisk,
-                "matchedHighRiskPhrase" to containsHighRiskPhrase
+                "matchedHighRiskPhrase" to containsHigh,
+                "matchedMediumRiskPhrase" to containsMedium
             )
         )
     }
@@ -52,14 +61,5 @@ class SafetyTool : AgentTool {
     companion object {
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
-
-        private val HIGH_RISK_PHRASES = listOf(
-            "chest pain",
-            "cannot breathe",
-            "can't breathe",
-            "fell down",
-            "fainted",
-            "severe weakness"
-        )
     }
 }
