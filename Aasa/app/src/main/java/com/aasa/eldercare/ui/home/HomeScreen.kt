@@ -82,6 +82,7 @@ fun HomeScreen(
     onMedicationClick: () -> Unit,
     onMemoryClick: () -> Unit,
     onTrustedCircleClick: () -> Unit,
+    onScamShieldClick: () -> Unit,
     viewModel: HomeViewModel = aasaHomeViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -154,6 +155,8 @@ fun HomeScreen(
 
             TrustCopyCard()
 
+            ScamShieldEntryCard(onOpen = onScamShieldClick)
+
             VoiceSection(
                 uiState = uiState,
                 onMicClick = {
@@ -202,6 +205,7 @@ fun HomeScreen(
                 onOpenEmergencyDialer = { number ->
                     IntentActionLauncher.openDialer(context, number)
                 },
+                onOpenShield = onScamShieldClick,
                 onDismiss = viewModel::dismissPendingAction
             )
 
@@ -243,7 +247,8 @@ fun HomeScreen(
             NavigationShortcuts(
                 onMedicationClick = onMedicationClick,
                 onMemoryClick = onMemoryClick,
-                onTrustedCircleClick = onTrustedCircleClick
+                onTrustedCircleClick = onTrustedCircleClick,
+                onScamShieldClick = onScamShieldClick
             )
         }
     }
@@ -505,6 +510,7 @@ private fun PendingActionSection(
     onCallContact: (String) -> Unit,
     onOpenSms: (String, String) -> Unit,
     onOpenEmergencyDialer: (String) -> Unit,
+    onOpenShield: () -> Unit,
     onDismiss: () -> Unit
 ) {
     when {
@@ -548,6 +554,20 @@ private fun PendingActionSection(
                     uiState.pendingPhoneNumber?.let(onCallContact)
                     onDismiss()
                 },
+                onDismiss = onDismiss
+            )
+        }
+        uiState.showScamAnalysisCard -> {
+            ScamAnalysisCard(
+                riskCopy = uiState.scamRiskCopy,
+                signals = uiState.pendingScamSignals,
+                safeAction = uiState.pendingSafeAction,
+                contactName = uiState.pendingContactName,
+                phoneNumber = uiState.pendingPhoneNumber,
+                onCallContact = {
+                    uiState.pendingPhoneNumber?.let(onCallContact)
+                },
+                onOpenShield = onOpenShield,
                 onDismiss = onDismiss
             )
         }
@@ -1163,7 +1183,8 @@ private fun LabeledLine(
 private fun NavigationShortcuts(
     onMedicationClick: () -> Unit,
     onMemoryClick: () -> Unit,
-    onTrustedCircleClick: () -> Unit
+    onTrustedCircleClick: () -> Unit,
+    onScamShieldClick: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -1178,6 +1199,7 @@ private fun NavigationShortcuts(
             BigSectionButton(label = "Medication", onClick = onMedicationClick)
             BigSectionButton(label = "Memory", onClick = onMemoryClick)
             BigSectionButton(label = "Trusted Circle", onClick = onTrustedCircleClick)
+            BigSectionButton(label = "Scam & Fraud Shield", onClick = onScamShieldClick)
         }
     }
 }
@@ -1195,6 +1217,184 @@ private fun BigSectionButton(label: String, onClick: () -> Unit) {
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+// ---------------------------------------------------------------------
+// Phase 8.5 Scam & Fraud Shield (Home surface)
+// ---------------------------------------------------------------------
+
+/**
+ * Prominent entry card encouraging the elder to open the dedicated
+ * shield screen when they receive a suspicious message. Sits high in
+ * the layout so it's visible without scrolling.
+ */
+@Composable
+private fun ScamShieldEntryCard(onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Scam & Fraud Shield",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                text = "Got a strange message? Paste it here and Aasa will check it for you.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Button(
+                onClick = onOpen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = "Open Scam Shield",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Inline result card surfaced on Home after the demo "Scam Alert"
+ * scenario (or any other turn that triggers ScamShieldTool).
+ *
+ * Mirrors the polished result card on [com.aasa.eldercare.ui.scamshield.ScamShieldScreen]
+ * but stays compact so it reads cleanly inside the Home scroll. The
+ * "Call Priya" tap launches `ACTION_DIAL`; we never auto-call.
+ */
+@Composable
+private fun ScamAnalysisCard(
+    riskCopy: ScamRiskCopy?,
+    signals: List<String>,
+    safeAction: String?,
+    contactName: String?,
+    phoneNumber: String?,
+    onCallContact: () -> Unit,
+    onOpenShield: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val container = when (riskCopy?.level) {
+        RiskCopy.RiskLevel.HIGH -> MaterialTheme.colorScheme.errorContainer
+        RiskCopy.RiskLevel.MEDIUM -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val onContainer = when (riskCopy?.level) {
+        RiskCopy.RiskLevel.HIGH -> MaterialTheme.colorScheme.onErrorContainer
+        RiskCopy.RiskLevel.MEDIUM -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Scam Risk: ${riskCopy?.level?.name ?: "—"}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = onContainer
+            )
+            riskCopy?.let { copy ->
+                Text(
+                    text = copy.label,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = onContainer
+                )
+                Text(
+                    text = copy.explanation,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = onContainer
+                )
+            }
+
+            if (signals.isNotEmpty()) {
+                Text(
+                    text = "Why it may not be safe",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onContainer
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    signals.forEach { signal ->
+                        Text(
+                            text = "• $signal",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = onContainer
+                        )
+                    }
+                }
+            }
+
+            safeAction?.takeIf { it.isNotBlank() }?.let { action ->
+                Text(
+                    text = "Safe next step",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onContainer
+                )
+                Text(
+                    text = action,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = onContainer
+                )
+            }
+
+            if (!contactName.isNullOrBlank() && !phoneNumber.isNullOrBlank()) {
+                Button(
+                    onClick = onCallContact,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                ) {
+                    Text(
+                        text = "Call $contactName",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onOpenShield,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                ) {
+                    Text(text = "Open Shield", fontSize = 16.sp)
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                ) {
+                    Text(text = "Dismiss", fontSize = 16.sp)
+                }
+            }
+        }
     }
 }
 

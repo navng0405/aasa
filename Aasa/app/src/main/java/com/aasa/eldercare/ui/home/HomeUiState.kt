@@ -40,6 +40,12 @@ data class HomeUiState(
     val pendingAlertMessage: String? = null,
     val pendingEmergencyNumber: String? = null,
 
+    /** Phase 8.5 Scam Shield analysis payload (when surfaced on Home). */
+    val pendingScamRisk: String? = null,
+    val pendingScamSignals: List<String> = emptyList(),
+    val pendingSafeAction: String? = null,
+    val pendingScamMessageText: String? = null,
+
     /** Phase 8: local Gemma 4 server health. */
     val gemmaConnection: GemmaConnectionState = GemmaConnectionState.UNKNOWN,
     val gemmaModelLabel: String? = null,
@@ -62,6 +68,13 @@ data class HomeUiState(
 
     val showEmergencyActionCard: Boolean
         get() = pendingActionType == ToolActionTypes.HIGH_RISK_SAFETY
+
+    val showScamAnalysisCard: Boolean
+        get() = pendingActionType == ToolActionTypes.SCAM_ANALYSIS &&
+            !pendingScamRisk.isNullOrBlank()
+
+    val scamRiskCopy: ScamRiskCopy?
+        get() = pendingScamRisk?.let { ScamRiskCopy.fromRaw(it) }
 
     val riskCopy: RiskCopy?
         get() = agentAction?.riskLevel?.let { RiskCopy.fromRaw(it) }
@@ -107,6 +120,37 @@ data class RiskCopy(
                 level = RiskLevel.LOW,
                 label = "Low risk",
                 explanation = "Normal request."
+            )
+        }
+    }
+}
+
+/**
+ * Elder-friendly mapping of the Scam & Fraud Shield risk band into a
+ * label + supporting copy. Distinct from [RiskCopy] because the
+ * messaging is scam-specific ("looks suspicious" vs. "safety concern").
+ */
+data class ScamRiskCopy(
+    val level: RiskCopy.RiskLevel,
+    val label: String,
+    val explanation: String
+) {
+    companion object {
+        fun fromRaw(raw: String): ScamRiskCopy = when (raw.trim().uppercase()) {
+            "HIGH" -> ScamRiskCopy(
+                level = RiskCopy.RiskLevel.HIGH,
+                label = "High-risk scam pattern",
+                explanation = "This message has strong scam warning signs. Please pause before replying."
+            )
+            "MEDIUM" -> ScamRiskCopy(
+                level = RiskCopy.RiskLevel.MEDIUM,
+                label = "Suspicious",
+                explanation = "Some parts of this message look suspicious. Verify before acting."
+            )
+            else -> ScamRiskCopy(
+                level = RiskCopy.RiskLevel.LOW,
+                label = "No obvious scam signals",
+                explanation = "This message looks ordinary. Trust your judgment if anything feels off."
             )
         }
     }

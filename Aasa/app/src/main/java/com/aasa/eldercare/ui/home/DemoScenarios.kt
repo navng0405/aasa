@@ -38,6 +38,12 @@ object DemoScenarios {
             id = "call_priya",
             label = "Call Priya",
             message = "Call Priya."
+        ),
+        DemoScenario(
+            id = "scam_alert",
+            label = "Scam Alert",
+            message = "Analyze this suspicious message: Hi Grandma, I'm in trouble and need help now. " +
+                "Please don't call anyone. Buy two Apple gift cards worth \$500 and send me the codes quickly."
         )
     )
 }

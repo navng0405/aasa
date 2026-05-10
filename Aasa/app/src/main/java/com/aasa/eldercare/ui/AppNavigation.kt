@@ -7,6 +7,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aasa.eldercare.ui.home.HomeScreen
 import com.aasa.eldercare.ui.medication.MedicationScreen
 import com.aasa.eldercare.ui.memory.MemoryScreen
+import com.aasa.eldercare.ui.scamshield.ScamShieldScreen
 import com.aasa.eldercare.ui.trustedcircle.TrustedCircleScreen
 
 object AasaRoutes {
@@ -14,6 +15,7 @@ object AasaRoutes {
     const val MEDICATION = "medication"
     const val MEMORY = "memory"
     const val TRUSTED_CIRCLE = "trusted_circle"
+    const val SCAM_SHIELD = "scam_shield"
 }
 
 @Composable
@@ -28,7 +30,8 @@ fun AppNavigation() {
             HomeScreen(
                 onMedicationClick = { navController.navigate(AasaRoutes.MEDICATION) },
                 onMemoryClick = { navController.navigate(AasaRoutes.MEMORY) },
-                onTrustedCircleClick = { navController.navigate(AasaRoutes.TRUSTED_CIRCLE) }
+                onTrustedCircleClick = { navController.navigate(AasaRoutes.TRUSTED_CIRCLE) },
+                onScamShieldClick = { navController.navigate(AasaRoutes.SCAM_SHIELD) }
             )
         }
         composable(AasaRoutes.MEDICATION) {
@@ -43,6 +46,11 @@ fun AppNavigation() {
         }
         composable(AasaRoutes.TRUSTED_CIRCLE) {
             TrustedCircleScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(AasaRoutes.SCAM_SHIELD) {
+            ScamShieldScreen(
                 onBack = { navController.popBackStack() }
             )
         }

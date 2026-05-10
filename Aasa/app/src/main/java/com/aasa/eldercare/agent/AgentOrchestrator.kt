@@ -4,6 +4,7 @@ import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.model.ModelRunner
 import com.aasa.eldercare.tools.IntentKeywords
 import com.aasa.eldercare.tools.SafetyKeywords
+import com.aasa.eldercare.tools.ScamKeywords
 import com.aasa.eldercare.tools.ToolNames
 import com.aasa.eldercare.tools.ToolRegistry
 
@@ -16,6 +17,9 @@ import com.aasa.eldercare.tools.ToolRegistry
  *   3. Convert the network DTO into a domain [AgentAction].
      *   4. Apply *deterministic overrides* on the user message:
  *        - emergency / symptom phrases     -> SafetyTool (HIGH / MEDIUM)
+ *        - "analyze this suspicious message:" or HIGH-weight scam
+ *          keywords (gift card, OTP, wire transfer, threat language)
+ *                                          -> ScamShieldTool / ANALYZE_SCAM
  *        - "did I take my medicine?"       -> MedicationTool / CHECK_MEDICATION
  *        - "I took my medicine"            -> MedicationTool / LOG_MEDICATION
  *        - "X's birthday is …" / "remember that …" / "my favorite …"
@@ -85,6 +89,25 @@ class AgentOrchestrator(
                 arguments = enrichedArgs
             )
 
+            // --- 1b. Scam Shield override -------------------------------
+            // Either an explicit "analyze this suspicious message:"
+            // request OR raw text the keyword scanner already flags as
+            // a scam should run through ScamShieldTool, even if Gemma
+            // routed it elsewhere.
+            ScamKeywords.isScamAnalysisRequest(userMessage) ||
+                ScamKeywords.looksLikeScamMessage(userMessage) -> {
+                val pasted = ScamKeywords.extractMessageText(userMessage)
+                action.copy(
+                    intent = INTENT_ANALYZE_SCAM,
+                    tool = ToolNames.SCAM_SHIELD,
+                    riskLevel = action.riskLevel.ifBlank { RISK_LOW },
+                    assistantResponse = action.assistantResponse,
+                    arguments = enrichedArgs + mapOf(
+                        "messageText" to pasted.ifBlank { userMessage }
+                    )
+                )
+            }
+
             // --- 2. Medication intent overrides -------------------------
             IntentKeywords.isMedicationCheckQuery(userMessage) -> action.copy(
                 intent = INTENT_CHECK_MEDICATION,
@@ -125,6 +148,7 @@ class AgentOrchestrator(
         private const val INTENT_CHECK_MEDICATION = "CHECK_MEDICATION"
         private const val INTENT_LOG_MEDICATION = "LOG_MEDICATION"
         private const val INTENT_SAVE_MEMORY = "SAVE_MEMORY"
+        private const val INTENT_ANALYZE_SCAM = "ANALYZE_SCAM"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"

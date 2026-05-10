@@ -113,7 +113,11 @@ class HomeViewModel(
                 pendingContactName = null,
                 pendingPhoneNumber = null,
                 pendingAlertMessage = null,
-                pendingEmergencyNumber = null
+                pendingEmergencyNumber = null,
+                pendingScamRisk = null,
+                pendingScamSignals = emptyList(),
+                pendingSafeAction = null,
+                pendingScamMessageText = null
             )
             runCatching { orchestrator.handleUserMessage(message) }
                 .onSuccess { result ->
@@ -133,6 +137,10 @@ class HomeViewModel(
                         pendingPhoneNumber = pending.phoneNumber,
                         pendingAlertMessage = pending.alertMessage,
                         pendingEmergencyNumber = pending.emergencyNumber,
+                        pendingScamRisk = pending.scamRisk,
+                        pendingScamSignals = pending.scamSignals,
+                        pendingSafeAction = pending.safeAction,
+                        pendingScamMessageText = pending.scamMessageText,
                         // Successful turn = server is reachable.
                         gemmaConnection = GemmaConnectionState.CONNECTED
                     )
@@ -156,6 +164,10 @@ class HomeViewModel(
                         pendingPhoneNumber = null,
                         pendingAlertMessage = null,
                         pendingEmergencyNumber = null,
+                        pendingScamRisk = null,
+                        pendingScamSignals = emptyList(),
+                        pendingSafeAction = null,
+                        pendingScamMessageText = null,
                         // Failed network round-trip = mark disconnected
                         // so the status card reflects reality.
                         gemmaConnection = GemmaConnectionState.DISCONNECTED
@@ -184,8 +196,28 @@ class HomeViewModel(
                 alertMessage = (data[ToolResultKeys.ALERT_MESSAGE] as? String)?.takeIf { it.isNotBlank() },
                 emergencyNumber = (data[ToolResultKeys.EMERGENCY_NUMBER] as? String)?.takeIf { it.isNotBlank() }
             )
+            ToolActionTypes.SCAM_ANALYSIS -> PendingAction(
+                actionType = actionType,
+                contactName = (data[ToolResultKeys.CONTACT_NAME] as? String)?.takeIf { it.isNotBlank() },
+                phoneNumber = (data[ToolResultKeys.PHONE_NUMBER] as? String)?.takeIf { it.isNotBlank() },
+                scamRisk = (data[ToolResultKeys.SCAM_RISK] as? String)?.takeIf { it.isNotBlank() },
+                scamSignals = readSignalList(data[ToolResultKeys.SCAM_SIGNALS]),
+                safeAction = (data[ToolResultKeys.SAFE_ACTION] as? String)?.takeIf { it.isNotBlank() },
+                scamMessageText = (data[ToolResultKeys.MESSAGE_TEXT] as? String)?.takeIf { it.isNotBlank() }
+            )
             else -> PendingAction.NONE
         }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun readSignalList(raw: Any?): List<String> = when (raw) {
+        is List<*> -> raw.filterIsInstance<String>()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        is String -> raw.split(',', ';', '|')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        else -> emptyList()
     }
 
     fun dismissPendingAction() {
@@ -194,7 +226,11 @@ class HomeViewModel(
             pendingContactName = null,
             pendingPhoneNumber = null,
             pendingAlertMessage = null,
-            pendingEmergencyNumber = null
+            pendingEmergencyNumber = null,
+            pendingScamRisk = null,
+            pendingScamSignals = emptyList(),
+            pendingSafeAction = null,
+            pendingScamMessageText = null
         )
     }
 
@@ -203,7 +239,11 @@ class HomeViewModel(
         val contactName: String? = null,
         val phoneNumber: String? = null,
         val alertMessage: String? = null,
-        val emergencyNumber: String? = null
+        val emergencyNumber: String? = null,
+        val scamRisk: String? = null,
+        val scamSignals: List<String> = emptyList(),
+        val safeAction: String? = null,
+        val scamMessageText: String? = null
     ) {
         companion object {
             val NONE = PendingAction()
@@ -233,6 +273,10 @@ class HomeViewModel(
                         pendingPhoneNumber = null,
                         pendingAlertMessage = null,
                         pendingEmergencyNumber = null,
+                        pendingScamRisk = null,
+                        pendingScamSignals = emptyList(),
+                        pendingSafeAction = null,
+                        pendingScamMessageText = null,
                         recognizedSpeech = null,
                         errorMessage = null,
                         voiceError = null

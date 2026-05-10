@@ -40,6 +40,12 @@ object ToolResultKeys {
     const val PERSISTED = "persisted"
     const val ORIGINAL_RISK_LEVEL = "originalRiskLevel"
     const val EFFECTIVE_RISK_LEVEL = "effectiveRiskLevel"
+
+    // Scam & Fraud Shield (Phase 8.5)
+    const val MESSAGE_TEXT = "messageText"
+    const val SCAM_RISK = "scamRisk"
+    const val SCAM_SIGNALS = "scamSignals"
+    const val SAFE_ACTION = "safeAction"
 }
 
 /**
@@ -51,4 +57,5 @@ object ToolActionTypes {
     const val CALL_CONTACT = "CALL_CONTACT"
     const val ALERT_TRUSTED_CONTACT = "ALERT_TRUSTED_CONTACT"
     const val HIGH_RISK_SAFETY = "HIGH_RISK_SAFETY"
+    const val SCAM_ANALYSIS = "SCAM_ANALYSIS"
 }
