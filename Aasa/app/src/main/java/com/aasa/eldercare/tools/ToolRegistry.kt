@@ -1,6 +1,9 @@
 package com.aasa.eldercare.tools
 
 import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.data.repository.MedicationRepository
+import com.aasa.eldercare.data.repository.MemoryRepository
+import com.aasa.eldercare.data.repository.TrustedContactRepository
 
 /**
  * Central dispatch from a Gemma-supplied tool name to the matching local
@@ -32,14 +35,22 @@ class ToolRegistry private constructor(
     fun availableTools(): Set<String> = toolsByName.keys
 
     companion object {
-        /** Default registry wiring all six Phase-3 tools. */
-        fun createDefault(): ToolRegistry = ToolRegistry(
+        /**
+         * Default registry wiring all six tools with their Room-backed
+         * repositories. Phase 4: Medication / Memory / TrustedContact
+         * persist; Chat / Safety / Reminder remain stateless.
+         */
+        fun createDefault(
+            medicationRepository: MedicationRepository,
+            memoryRepository: MemoryRepository,
+            trustedContactRepository: TrustedContactRepository
+        ): ToolRegistry = ToolRegistry(
             listOf(
                 ChatTool(),
-                MedicationTool(),
-                MemoryTool(),
+                MedicationTool(medicationRepository),
+                MemoryTool(memoryRepository),
                 SafetyTool(),
-                TrustedContactTool(),
+                TrustedContactTool(trustedContactRepository),
                 ReminderTool()
             )
         )

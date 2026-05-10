@@ -1,5 +1,6 @@
 package com.aasa.eldercare.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -26,14 +28,22 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.data.entity.ConversationEntity
 import com.google.gson.GsonBuilder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private val SAMPLE_MESSAGES = listOf(
     "I took my BP tablet.",
+    "Did I take my medicine today?",
     "I feel weak and missed my medicine.",
     "My granddaughter Ananya's birthday is May 12.",
     "Call Priya."
@@ -45,9 +55,10 @@ fun HomeScreen(
     onMedicationClick: () -> Unit,
     onMemoryClick: () -> Unit,
     onTrustedCircleClick: () -> Unit,
-    viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory())
+    viewModel: HomeViewModel = aasaHomeViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val recentConversations by viewModel.recentConversations.collectAsState()
 
     Scaffold(
         topBar = {
@@ -103,6 +114,7 @@ fun HomeScreen(
                 ToolExecutionCard(
                     success = uiState.toolExecutionSuccess == true,
                     message = uiState.toolResultMessage.orEmpty(),
+                    persistedMessage = uiState.persistedToolResultMessage,
                     data = uiState.toolResultData
                 )
             }
@@ -112,6 +124,13 @@ fun HomeScreen(
                 RawResponseCard(rawResponse = action.rawResponse)
             }
 
+            ConversationHistoryCard(conversations = recentConversations)
+
+            DemoDataControls(
+                isResetting = uiState.isResettingDemoData,
+                onResetClick = viewModel::resetDemoData
+            )
+
             NavigationShortcuts(
                 onMedicationClick = onMedicationClick,
                 onMemoryClick = onMemoryClick,
@@ -119,6 +138,12 @@ fun HomeScreen(
             )
         }
     }
+}
+
+@Composable
+private fun aasaHomeViewModel(): HomeViewModel {
+    val application = LocalContext.current.applicationContext as AasaApplication
+    return viewModel(factory = HomeViewModel.Factory(application))
 }
 
 @Composable
@@ -186,6 +211,7 @@ private fun ErrorCard(message: String, onDismiss: () -> Unit) {
 private fun ToolExecutionCard(
     success: Boolean,
     message: String,
+    persistedMessage: String?,
     data: Map<String, Any?>
 ) {
     val container = if (success) {
@@ -207,11 +233,20 @@ private fun ToolExecutionCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                text = "Tool execution result",
-                style = MaterialTheme.typography.titleMedium,
-                color = onContainer
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Tool execution result",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = onContainer
+                )
+                if (persistedMessage != null) {
+                    PersistedPill()
+                }
+            }
             LabeledLine(
                 label = "Success",
                 value = success.toString(),
@@ -222,6 +257,13 @@ private fun ToolExecutionCard(
                 value = message.ifBlank { "(no message)" },
                 valueColor = onContainer
             )
+            persistedMessage?.let {
+                LabeledLine(
+                    label = "Persisted to Room",
+                    value = it,
+                    valueColor = onContainer
+                )
+            }
             LabeledLine(
                 label = "Data",
                 value = if (data.isEmpty()) "{}" else prettyPrintJson(data),
@@ -229,6 +271,22 @@ private fun ToolExecutionCard(
                 valueColor = onContainer
             )
         }
+    }
+}
+
+@Composable
+private fun PersistedPill() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = "Saved in Room",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer
+        )
     }
 }
 
@@ -289,6 +347,117 @@ private fun RawResponseCard(rawResponse: String?) {
 }
 
 @Composable
+private fun ConversationHistoryCard(conversations: List<ConversationEntity>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Recent conversations (from Room)",
+                style = MaterialTheme.typography.titleMedium
+            )
+            if (conversations.isEmpty()) {
+                Text(
+                    text = "No conversations yet. Send a message to start.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                conversations.take(8).forEach { entry ->
+                    ConversationRow(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationRow(entry: ConversationEntity) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(roleColor(entry.role))
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+        ) {
+            Text(
+                text = entry.role,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = entry.message.ifBlank { "(empty)" },
+                style = MaterialTheme.typography.bodyMedium
+            )
+            val meta = buildString {
+                append(formatTimestamp(entry.createdAt))
+                entry.intent?.let { append("  •  intent=$it") }
+                entry.tool?.let { append("  •  tool=$it") }
+                entry.riskLevel?.let { append("  •  risk=$it") }
+            }
+            Text(
+                text = meta,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun roleColor(role: String) = when (role) {
+    ConversationEntity.ROLE_USER -> MaterialTheme.colorScheme.secondaryContainer
+    ConversationEntity.ROLE_ASSISTANT -> MaterialTheme.colorScheme.tertiaryContainer
+    else -> MaterialTheme.colorScheme.surfaceVariant
+}
+
+@Composable
+private fun DemoDataControls(
+    isResetting: Boolean,
+    onResetClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Demo data",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Wipes all medications, memories, contacts and conversations from Room and re-seeds the BP tablet, Priya, and favorite-music memory.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                onClick = onResetClick,
+                enabled = !isResetting,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = if (isResetting) "Resetting..." else "Reset demo data")
+            }
+        }
+    }
+}
+
+@Composable
 private fun LabeledLine(
     label: String,
     value: String,
@@ -342,3 +511,8 @@ private val prettyGson = GsonBuilder().setPrettyPrinting().create()
 
 private fun prettyPrintJson(value: Any): String =
     runCatching { prettyGson.toJson(value) }.getOrDefault(value.toString())
+
+private val timestampFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+private fun formatTimestamp(epochMs: Long): String =
+    runCatching { timestampFormatter.format(Date(epochMs)) }.getOrDefault("")

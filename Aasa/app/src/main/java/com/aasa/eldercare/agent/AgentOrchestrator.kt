@@ -1,5 +1,6 @@
 package com.aasa.eldercare.agent
 
+import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.model.ModelRunner
 import com.aasa.eldercare.tools.SafetyKeywords
 import com.aasa.eldercare.tools.ToolNames
@@ -8,43 +9,51 @@ import com.aasa.eldercare.tools.ToolRegistry
 /**
  * Single entry point for "user said something" turns.
  *
- * The flow is intentionally small in Phase 3:
- *   1. Send the message to the local Gemma bridge via [ModelRunner].
- *   2. Convert the network DTO into a domain [AgentAction].
- *   3. Apply a defensive *safety override*: if the **user message**
+ * The flow:
+ *   1. Persist the user message (USER role) into [ConversationRepository].
+ *   2. Send the message to the local Gemma bridge via [ModelRunner].
+ *   3. Convert the network DTO into a domain [AgentAction].
+ *   4. Apply a defensive *safety override*: if the **user message**
  *      itself contains an obvious emergency or symptom phrase, force-
- *      route to [com.aasa.eldercare.tools.SafetyTool] regardless of
- *      what Gemma decided. This is critical: elder safety must never
- *      depend on prompt-time classification luck.
- *   4. Run the matching tool through [ToolRegistry].
- *   5. Return both the action and the tool result for the UI.
+ *      route to [com.aasa.eldercare.tools.SafetyTool]. Elder safety must
+ *      not depend on prompt-time classification luck.
+ *   5. Run the matching tool through [ToolRegistry] (which is the layer
+ *      that actually writes medications / memories / etc. to Room).
+ *   6. Persist the post-override assistant response (ASSISTANT role)
+ *      with intent / riskLevel / tool for audit.
+ *   7. Return both the action and the tool result for the UI.
  */
 class AgentOrchestrator(
     private val modelRunner: ModelRunner,
-    private val toolRegistry: ToolRegistry
+    private val toolRegistry: ToolRegistry,
+    private val conversationRepository: ConversationRepository
 ) {
 
     suspend fun handleUserMessage(message: String): AgentExecutionResult {
+        conversationRepository.saveUserMessage(message)
+
         val rawResponse = modelRunner.sendMessage(message)
         val parsedAction = rawResponse.toAgentAction()
         val safeAction = applySafetyOverride(message, parsedAction)
         val toolResult = toolRegistry.execute(safeAction)
+
+        conversationRepository.saveAssistantMessage(
+            message = safeAction.assistantResponse,
+            intent = safeAction.intent,
+            riskLevel = safeAction.riskLevel,
+            tool = safeAction.tool
+        )
+
         return AgentExecutionResult(action = safeAction, toolResult = toolResult)
     }
 
     /**
      * Belt-and-braces check on the *user input* itself.
      *
-     *  - If the elder typed a known-emergency phrase (e.g. "cannot
-     *    breathe", "chest pain") we override Gemma's routing to
-     *    [ToolNames.SAFETY] with `riskLevel = HIGH`.
-     *  - Otherwise, if the message contains a medium-tier symptom or
-     *    missed-medication phrase (e.g. "feel weak", "missed my
-     *    medicine") we override to [ToolNames.SAFETY] with
-     *    `riskLevel = MEDIUM`.
-     *  - In both cases we set `intent = SAFETY_CHECK` so the parsed
-     *    response card on the home screen reflects the corrected
-     *    classification.
+     *  - HIGH-risk phrase match -> force [ToolNames.SAFETY] + `HIGH`.
+     *  - MEDIUM-risk phrase match -> force [ToolNames.SAFETY] + `MEDIUM`.
+     *  - In both cases set `intent = SAFETY_CHECK` so the parsed
+     *    response card reflects the corrected classification.
      *
      * The original user message is also stashed in
      * `arguments["userMessage"]` so [com.aasa.eldercare.tools.SafetyTool]
