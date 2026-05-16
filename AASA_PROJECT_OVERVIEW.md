@@ -29,7 +29,7 @@ These are baked into the code and prompt; do **not** suggest changes that violat
 - **No medical diagnosis.** Tools and prompts are explicit about not naming conditions (Parkinson's, dementia, stroke, etc.). They describe behavior ("your walk looked a little less steady than usual"), not pathology.
 - **No auto-dial / no auto-SMS.** Phone actions go through `Intent.ACTION_DIAL` (never `ACTION_CALL`) so the `CALL_PHONE` permission is *not* requested. SMS uses `ACTION_SENDTO` with `smsto:` so the elder still has to press send.
 - **No background sensing.** Both `FallDetectionManager` and `MobilitySensorManager` only run while their screen is foregrounded; the ViewModel calls `stop()` in `onCleared`. There is no `WorkManager` job, no foreground service, no boot-time start.
-- **No cloud LLM.** Default inference path is **on-device** (LiteRT-LM + `gemma-4-E2B-it.litertlm`). The optional Mac bridge at `http://127.0.0.1:8000/agent/message` (reached via `adb reverse tcp:8000 tcp:8000`) is a **dev fallback only**, used when the on-device model file is missing or the developer explicitly toggles "Force bridge."
+- **No cloud LLM.** Default inference path is **on-device only** (LiteRT-LM + `gemma-4-E2B-it.litertlm`). The optional Mac bridge at `http://127.0.0.1:8000/agent/message` is a **dev fallback only** and must be explicitly enabled at build time.
 - **Deferred confirmation, always.** Tools never act — they return a `ToolResult` whose `data["actionType"]` tells the UI to render an action card with explicit elder-controlled buttons.
 - **Deterministic safety wins.** If the on-device keyword scanner says "this is HIGH risk" and Gemma says LOW, the device **escalates** to HIGH. We never downgrade.
 
@@ -369,9 +369,9 @@ Aasa now runs **Gemma 4 E2B directly on the phone** through Google's LiteRT-LM K
 
 ### Routing rules (`GemmaRouter`)
 
-1. **Force bridge toggle** is ON → bridge.
-2. On-device runner reports `isAvailable() == false` (model file missing, ABI not arm64-v8a, engine init failed) → bridge.
-3. Otherwise → **on-device** (default). On generation failure, transparently fall back to bridge if it's reachable; otherwise return a canned error.
+1. On-device runner reports `isAvailable() == true` → on-device.
+2. Otherwise → show a local setup error with the exact model path.
+3. If the app is built with `-PaasaEnableGemmaBridge=true`, the router may use the Mac bridge as a developer fallback.
 
 The router exposes `activeRunnerLabel` ("On-device · Gemma 4 E2B" vs "Mac bridge · gemma4:e2b") + `lastRoutingReason` so the Home status card can show *why* the active runner won.
 
@@ -408,7 +408,7 @@ adb push ~/aasa-models/gemma-4-e2b-it-litert-lm/gemma-4-E2B-it.litertlm \
   /sdcard/Android/data/com.aasa.eldercare/files/models/gemma-4-E2B-it.litertlm
 ```
 
-If the file is absent the app boots fine and the router transparently uses the bridge with a `lastRoutingReason = "model file not found"`. This keeps the emulator-on-Apple-Silicon path working and avoids hard-crashes on a fresh device.
+If the file is absent the app boots fine, but model turns remain mobile-only and show a setup error with the expected path. For convenience, the runner accepts either the exact filename above or the first `.litertlm` file found in the same `models/` directory.
 
 ### What is *not* yet done in Phase 9
 

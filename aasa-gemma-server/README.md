@@ -2,6 +2,14 @@
 
 FastAPI bridge for the Phase 0.5 AasaGemmaBridgePoc.
 
+The Android app now defaults to the on-device LiteRT-LM model. Use this server
+only when you intentionally build the app with bridge fallback enabled:
+
+```bash
+cd ../Aasa
+./gradlew :app:installDebug -PaasaEnableGemmaBridge=true
+```
+
 Android will call:
 
 ```text
@@ -12,6 +20,15 @@ Through:
 
 ```bash
 adb reverse tcp:8000 tcp:8000
+```
+
+On a physical phone, `127.0.0.1` is the phone itself unless `adb reverse` is
+active. If you prefer Wi-Fi/LAN instead of USB reverse, run the server on all
+interfaces and build the app with your Mac's LAN IP:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+./gradlew :app:installDebug -PaasaGemmaBaseUrl=http://<mac-ip>:8000/
 ```
 
 ## 1. Install Ollama
@@ -107,6 +124,18 @@ Then the Android app can call:
 http://127.0.0.1:8000/agent/message
 ```
 
+For Wi-Fi/LAN instead, start FastAPI with:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Find your Mac's IP address, then install the app with:
+
+```bash
+./gradlew :app:installDebug -PaasaGemmaBaseUrl=http://<mac-ip>:8000/
+```
+
 ## Troubleshooting
 
 If Ollama model name fails:
@@ -127,6 +156,13 @@ If Android cannot reach the server, rerun:
 
 ```bash
 adb reverse tcp:8000 tcp:8000
+```
+
+Or rebuild for LAN:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+./gradlew :app:installDebug -PaasaGemmaBaseUrl=http://<mac-ip>:8000/
 ```
 
 ## POC Medication Log Behavior
