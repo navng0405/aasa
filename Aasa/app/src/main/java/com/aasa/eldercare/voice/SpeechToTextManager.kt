@@ -68,6 +68,7 @@ class SpeechToTextManager(
 
     fun startListening(language: Locale = Locale.getDefault()) {
         runOnMain {
+            if (_isListening.value) return@runOnMain
             if (!isRecognitionAvailable()) {
                 emit(SpeechEvent.Error("Speech recognition is not available on this device."))
                 return@runOnMain

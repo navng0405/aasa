@@ -99,6 +99,8 @@ object GreetingBuilder {
         "How are you doing?",
         "It's lovely to hear from you. How are you today?",
         "I'm right here. How are you feeling?",
+        "I'm here with you. How are you feeling?",
+        "Take your time, I'm listening. How are you today?",
         "How has your day been so far?",
         "How are things with you today?"
     )

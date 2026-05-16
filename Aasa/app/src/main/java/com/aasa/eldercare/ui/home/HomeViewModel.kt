@@ -355,12 +355,9 @@ class HomeViewModel(
                 null
             }
         )
-        // Phase 12: if the elder previously opted in to "Hey Aasa"
-        // and we now know the mic permission is granted, (re-)start
-        // the service. No-op if either pre-condition isn't met.
-        if (granted) {
-            maybeStartHotwordService()
-        }
+        // The Application process lifecycle starts the hotword service
+        // only after the app backgrounds. Keeping it out of foreground
+        // avoids fighting the in-app greeting and tap-to-talk recognizer.
     }
 
     /**
@@ -651,21 +648,10 @@ class HomeViewModel(
                 return
             }
             userPreferences.hotwordEnabled = true
-            runCatching { HotwordService.start(appContext) }
-                .onSuccess {
-                    _uiState.value = _uiState.value.copy(
-                        hotwordEnabled = true,
-                        hotwordError = null
-                    )
-                }
-                .onFailure { error ->
-                    userPreferences.hotwordEnabled = false
-                    _uiState.value = _uiState.value.copy(
-                        hotwordEnabled = false,
-                        hotwordError = "Could not start wake word: " +
-                            error.toReadableMessage()
-                    )
-                }
+            _uiState.value = _uiState.value.copy(
+                hotwordEnabled = true,
+                hotwordError = null
+            )
         } else {
             userPreferences.hotwordEnabled = false
             runCatching { HotwordService.stop(appContext) }

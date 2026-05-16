@@ -178,7 +178,70 @@ fun HomeScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            HeaderSection()
+            VoiceSection(
+                uiState = uiState,
+                onMicClick = {
+                    if (uiState.isListening) {
+                        viewModel.stopListening()
+                        return@VoiceSection
+                    }
+                    if (uiState.hasMicPermission) {
+                        viewModel.startListening()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onStopSpeakingClick = viewModel::stopSpeaking,
+                onDismissVoiceError = viewModel::clearVoiceError
+            )
+
+            HeardSection(text = uiState.recognizedSpeech)
+
+            ManualInputSection(
+                inputText = uiState.inputText,
+                isLoading = uiState.isLoading,
+                onChange = viewModel::onInputChange,
+                onSend = viewModel::sendCurrentMessage
+            )
+
+            if (uiState.isLoading) {
+                LoadingRow()
+            }
+
+            uiState.errorMessage?.let { error ->
+                ErrorCard(message = error, onDismiss = viewModel::clearError)
+            }
+
+            PendingActionSection(
+                uiState = uiState,
+                onCallContact = { number ->
+                    IntentActionLauncher.openDialer(context, number)
+                },
+                onOpenSms = { number, body ->
+                    IntentActionLauncher.openSms(context, number, body)
+                },
+                onOpenEmergencyDialer = { number ->
+                    IntentActionLauncher.openDialer(context, number)
+                },
+                onOpenShield = onScamShieldClick,
+                onDismiss = viewModel::dismissPendingAction
+            )
+
+            uiState.agentAction?.let { action ->
+                AssistantResponseCard(
+                    action = action,
+                    riskCopy = uiState.riskCopy
+                )
+            }
+
+            if (uiState.toolExecutionSuccess != null) {
+                ToolSummaryCard(
+                    toolName = uiState.agentAction?.tool,
+                    success = uiState.toolExecutionSuccess == true,
+                    message = uiState.toolResultMessage.orEmpty(),
+                    persistedMessage = uiState.persistedToolResultMessage
+                )
+            }
 
             UserNameCard(
                 currentName = uiState.userName,
@@ -232,6 +295,11 @@ fun HomeScreen(
 
             TrustCopyCard()
 
+            DemoScenariosSection(
+                enabled = !uiState.isLoading,
+                onScenarioClick = viewModel::runDemoScenario
+            )
+
             ScamShieldEntryCard(onOpen = onScamShieldClick)
 
             FallTriageEntryCard(onOpen = onFallTriageClick)
@@ -239,74 +307,6 @@ fun HomeScreen(
             MobilityShieldEntryCard(onOpen = onMobilityShieldClick)
 
             HealthBriefingEntryCard(onOpen = onHealthBriefingClick)
-
-            VoiceSection(
-                uiState = uiState,
-                onMicClick = {
-                    if (uiState.isListening) {
-                        viewModel.stopListening()
-                        return@VoiceSection
-                    }
-                    if (uiState.hasMicPermission) {
-                        viewModel.startListening()
-                    } else {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                },
-                onStopSpeakingClick = viewModel::stopSpeaking,
-                onDismissVoiceError = viewModel::clearVoiceError
-            )
-
-            ManualInputSection(
-                inputText = uiState.inputText,
-                isLoading = uiState.isLoading,
-                onChange = viewModel::onInputChange,
-                onSend = viewModel::sendCurrentMessage
-            )
-
-            DemoScenariosSection(
-                enabled = !uiState.isLoading,
-                onScenarioClick = viewModel::runDemoScenario
-            )
-
-            if (uiState.isLoading) {
-                LoadingRow()
-            }
-
-            uiState.errorMessage?.let { error ->
-                ErrorCard(message = error, onDismiss = viewModel::clearError)
-            }
-
-            PendingActionSection(
-                uiState = uiState,
-                onCallContact = { number ->
-                    IntentActionLauncher.openDialer(context, number)
-                },
-                onOpenSms = { number, body ->
-                    IntentActionLauncher.openSms(context, number, body)
-                },
-                onOpenEmergencyDialer = { number ->
-                    IntentActionLauncher.openDialer(context, number)
-                },
-                onOpenShield = onScamShieldClick,
-                onDismiss = viewModel::dismissPendingAction
-            )
-
-            uiState.agentAction?.let { action ->
-                AssistantResponseCard(
-                    action = action,
-                    riskCopy = uiState.riskCopy
-                )
-            }
-
-            if (uiState.toolExecutionSuccess != null) {
-                ToolSummaryCard(
-                    toolName = uiState.agentAction?.tool,
-                    success = uiState.toolExecutionSuccess == true,
-                    message = uiState.toolResultMessage.orEmpty(),
-                    persistedMessage = uiState.persistedToolResultMessage
-                )
-            }
 
             DeveloperDetailsToggle(
                 expanded = showDeveloperDetails,
@@ -600,7 +600,7 @@ private fun HotwordCard(
                     )
                     Text(
                         text = if (enabled) {
-                            "Listening for \u201CHey Aasa\u201D."
+                            "Ready when Aasa is in the background."
                         } else {
                             "Open Aasa hands-free by saying \u201CHey Aasa\u201D."
                         },
@@ -621,6 +621,7 @@ private fun HotwordCard(
             )
             Text(
                 text = "\u2022 The mic stays on while Aasa is listening, and a notification will be shown.\n" +
+                    "\u2022 To avoid mic conflicts, wake word listening runs after you leave the app.\n" +
                     "\u2022 This uses extra battery while active.\n" +
                     "\u2022 Recognition is hackathon-grade and may miss the phrase or fire on similar words. " +
                     "If it doesn\u2019t respond, you can always say \u201CHey Google, open Aasa.\u201D",
@@ -664,30 +665,47 @@ private fun ManualInputSection(
     onChange: (String) -> Unit,
     onSend: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = inputText,
-            onValueChange = onChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Type a message", fontSize = 16.sp) },
-            placeholder = { Text("e.g. I took my BP tablet.") },
-            enabled = !isLoading,
-            minLines = 2,
-            maxLines = 4,
-            textStyle = MaterialTheme.typography.bodyLarge
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
-        Button(
-            onClick = onSend,
-            enabled = !isLoading && inputText.isNotBlank(),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = if (isLoading) "Sending..." else "Send",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold
+                text = "Type a message",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = onChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g. I took my BP tablet.") },
+                enabled = !isLoading,
+                minLines = 2,
+                maxLines = 4,
+                textStyle = MaterialTheme.typography.bodyLarge
+            )
+            Button(
+                onClick = onSend,
+                enabled = !isLoading && inputText.isNotBlank(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+            ) {
+                Text(text = "\u27A4", fontSize = 26.sp)
+                Text(text = "  ")
+                Text(
+                    text = if (isLoading) "Sending..." else "Send",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
@@ -847,7 +865,7 @@ private fun VoiceSection(
     onStopSpeakingClick: () -> Unit,
     onDismissVoiceError: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         MicButton(
             isListening = uiState.isListening,
             isSpeaking = uiState.isSpeaking,
@@ -864,10 +882,6 @@ private fun VoiceSection(
             ) {
                 Text(text = "Stop Speaking", fontSize = 16.sp)
             }
-        }
-
-        uiState.recognizedSpeech?.takeIf { it.isNotBlank() }?.let { spoken ->
-            RecognizedSpeechCard(text = spoken)
         }
 
         uiState.voiceError?.let { error ->
@@ -897,7 +911,8 @@ private fun MicButton(
         enabled = !isDisabled,
         modifier = Modifier
             .fillMaxWidth()
-            .height(112.dp),
+            .height(140.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -905,12 +920,12 @@ private fun MicButton(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             MicGlyph()
             Text(
                 text = label,
-                fontSize = 26.sp,
+                fontSize = 30.sp,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -926,20 +941,21 @@ private fun MicButton(
 private fun MicGlyph() {
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(72.dp)
             .clip(RoundedCornerShape(50))
             .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f)),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = "\uD83C\uDFA4",
-            fontSize = 22.sp
+            fontSize = 42.sp
         )
     }
 }
 
 @Composable
-private fun RecognizedSpeechCard(text: String) {
+private fun HeardSection(text: String?) {
+    val heard = text?.takeIf { it.isNotBlank() }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -947,19 +963,28 @@ private fun RecognizedSpeechCard(text: String) {
         )
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "I heard",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(text = "\uD83D\uDC42", fontSize = 38.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "I heard",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Text(
+                        text = heard ?: "Your words will appear here after you speak.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
         }
     }
 }
@@ -1495,6 +1520,28 @@ private fun BigSectionButton(label: String, onClick: () -> Unit) {
 // Phase 8.5 Scam & Fraud Shield (Home surface)
 // ---------------------------------------------------------------------
 
+@Composable
+private fun FeatureEntryHeader(
+    icon: String,
+    title: String,
+    color: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text(text = icon, fontSize = 42.sp)
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
 /**
  * Prominent entry card for the Mobility Shield (10-second walk check)
  * screen. Mirrors [FallTriageEntryCard]'s elder-friendly tone — large
@@ -1516,10 +1563,9 @@ private fun MobilityShieldEntryCard(onOpen: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Mobility Shield",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+            FeatureEntryHeader(
+                icon = "\uD83D\uDEB6",
+                title = "Mobility Shield",
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
             Text(
@@ -1562,10 +1608,9 @@ private fun HealthBriefingEntryCard(onOpen: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Morning Briefing",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+            FeatureEntryHeader(
+                icon = "\u2600\uFE0F",
+                title = "Morning Briefing",
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
             Text(
@@ -1608,10 +1653,9 @@ private fun FallTriageEntryCard(onOpen: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Fall Detection & Triage",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+            FeatureEntryHeader(
+                icon = "\uD83E\uDE7A",
+                title = "Fall Detection & Triage",
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Text(
@@ -1652,10 +1696,9 @@ private fun ScamShieldEntryCard(onOpen: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Scam & Fraud Shield",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+            FeatureEntryHeader(
+                icon = "\uD83D\uDEE1\uFE0F",
+                title = "Scam & Fraud Shield",
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
             Text(

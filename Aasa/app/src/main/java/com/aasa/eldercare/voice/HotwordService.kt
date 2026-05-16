@@ -57,6 +57,7 @@ class HotwordService : Service() {
     private var recognizer: SpeechRecognizer? = null
     private var listening: Boolean = false
     private var stopping: Boolean = false
+    private var wakeHandled: Boolean = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -67,6 +68,8 @@ class HotwordService : Service() {
                 return START_NOT_STICKY
             }
         }
+        stopping = false
+        wakeHandled = false
 
         if (!hasMicPermission()) {
             Log.w(TAG, "Missing RECORD_AUDIO; refusing to start hotword service.")
@@ -87,6 +90,7 @@ class HotwordService : Service() {
 
     override fun onDestroy() {
         stopping = true
+        mainHandler.removeCallbacks(restartRunnable)
         runCatching { recognizer?.cancel() }
         runCatching { recognizer?.destroy() }
         recognizer = null
@@ -120,6 +124,7 @@ class HotwordService : Service() {
 
     private fun stopForegroundSelf() {
         stopping = true
+        mainHandler.removeCallbacks(restartRunnable)
         runCatching { recognizer?.cancel() }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -226,6 +231,8 @@ class HotwordService : Service() {
     }
 
     private fun onWakeWordDetected() {
+        if (wakeHandled) return
+        wakeHandled = true
         Log.i(TAG, "Wake word detected — launching MainActivity.")
         val launch = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -238,12 +245,10 @@ class HotwordService : Service() {
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to launch MainActivity from hotword.", t)
         }
-        // Brief cool-down so the in-app greeting/listen flow can take
-        // over without us re-grabbing the mic immediately.
-        listening = false
-        runCatching { recognizer?.cancel() }
-        mainHandler.removeCallbacks(restartRunnable)
-        mainHandler.postDelayed(restartRunnable, POST_WAKE_COOLDOWN_MS)
+        // Hand the microphone fully to the foreground app. The process
+        // lifecycle observer restarts this service after the app is
+        // backgrounded again, if the elder's opt-in is still enabled.
+        stopForegroundSelf()
     }
 
     private fun buildListener(): RecognitionListener = object : RecognitionListener {
@@ -313,23 +318,21 @@ class HotwordService : Service() {
         private const val CHANNEL_ID = "aasa_hotword"
         private const val NOTIFICATION_ID = 4711
         private const val RESTART_DELAY_MS = 600L
-        private const val POST_WAKE_COOLDOWN_MS = 3_500L
 
         const val ACTION_STOP = "com.aasa.eldercare.voice.HOTWORD_STOP"
         const val EXTRA_FROM_WAKE_WORD = "from_wake_word"
 
         /**
          * Phrases that count as a wake word. Substring match on a
-         * lowercased recognition string — mirrors the style of
-         * `tools/SafetyKeywords.kt` so the trade-offs (false positives
-         * on "asa", "asia") are obvious. Tune as needed.
+         * lowercased recognition string. Keep these as full phrases:
+         * matching bare "Aasa" makes the service wake itself while the
+         * app's own greeting or response is being spoken.
          */
         private val WAKE_PHRASES = listOf(
             "hey aasa",
             "hey asa",
             "ok aasa",
-            "okay aasa",
-            "aasa"
+            "okay aasa"
         )
 
         fun start(context: Context) {

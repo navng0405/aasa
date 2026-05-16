@@ -1,14 +1,19 @@
 package com.aasa.eldercare
 
+import android.Manifest
 import android.app.Application
-import com.aasa.eldercare.BuildConfig
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.data.AppDatabase
+import com.aasa.eldercare.data.repository.HealthSnapshotRepository
 import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.MemoryRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
-import com.aasa.eldercare.data.repository.HealthSnapshotRepository
 import com.aasa.eldercare.data.preferences.UserPreferences
 import com.aasa.eldercare.data.seeder.DemoDataSeeder
 import com.aasa.eldercare.model.GemmaRouter
@@ -16,6 +21,7 @@ import com.aasa.eldercare.model.OnDeviceGemmaRunner
 import com.aasa.eldercare.model.RemoteLocalGemmaRunner
 import com.aasa.eldercare.network.RetrofitClient
 import com.aasa.eldercare.tools.ToolRegistry
+import com.aasa.eldercare.voice.HotwordService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -100,6 +106,7 @@ class AasaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        observeAppForegroundForHotword()
         applicationScope.launch {
             DemoDataSeeder.seed(database)
         }
@@ -113,6 +120,32 @@ class AasaApplication : Application() {
             }
         }
     }
+
+    /**
+     * Keep the hackathon wake-word recognizer out of the foreground app.
+     * Android's platform SpeechRecognizer is effectively single-owner on
+     * many devices; if the hotword service keeps relistening while Home is
+     * greeting or doing tap-to-talk, both sessions flap between busy/error.
+     */
+    private fun observeAppForegroundForHotword() {
+        if (!BuildConfig.AASA_ENABLE_HOTWORD) return
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                runCatching { HotwordService.stop(this@AasaApplication) }
+            }
+
+            override fun onStop(owner: LifecycleOwner) {
+                if (!userPreferences.hotwordEnabled || !hasMicPermission()) return
+                runCatching { HotwordService.start(this@AasaApplication) }
+            }
+        })
+    }
+
+    private fun hasMicPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
 
     /**
      * Wipe every table and reapply the demo seed. Suspends so the
