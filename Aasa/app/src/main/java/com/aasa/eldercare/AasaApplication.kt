@@ -8,6 +8,8 @@ import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.MemoryRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
 import com.aasa.eldercare.data.seeder.DemoDataSeeder
+import com.aasa.eldercare.model.GemmaRouter
+import com.aasa.eldercare.model.OnDeviceGemmaRunner
 import com.aasa.eldercare.model.RemoteLocalGemmaRunner
 import com.aasa.eldercare.network.RetrofitClient
 import com.aasa.eldercare.tools.ToolRegistry
@@ -52,9 +54,27 @@ class AasaApplication : Application() {
         )
     }
 
+    /** Phase 9: on-device Gemma 4 via LiteRT-LM. Side-loaded model file. */
+    val onDeviceGemmaRunner: OnDeviceGemmaRunner by lazy {
+        OnDeviceGemmaRunner(appContext = this)
+    }
+
+    /** Mac bridge — kept as a developer fallback. */
+    val remoteGemmaRunner: RemoteLocalGemmaRunner by lazy {
+        RemoteLocalGemmaRunner(RetrofitClient.apiService)
+    }
+
+    /**
+     * Picks per turn between on-device (default) and bridge (fallback).
+     * Implements [com.aasa.eldercare.model.ModelRunner] so the orchestrator is unchanged.
+     */
+    val gemmaRouter: GemmaRouter by lazy {
+        GemmaRouter(onDevice = onDeviceGemmaRunner, bridge = remoteGemmaRunner)
+    }
+
     val agentOrchestrator: AgentOrchestrator by lazy {
         AgentOrchestrator(
-            modelRunner = RemoteLocalGemmaRunner(RetrofitClient.apiService),
+            modelRunner = gemmaRouter,
             toolRegistry = toolRegistry,
             conversationRepository = conversationRepository
         )
@@ -64,6 +84,15 @@ class AasaApplication : Application() {
         super.onCreate()
         applicationScope.launch {
             DemoDataSeeder.seed(database)
+        }
+        // Pre-warm the on-device engine off the main thread. Cold-start can be
+        // up to ~10 s on Pixel 4a — doing it eagerly hides that from the first turn.
+        applicationScope.launch {
+            try {
+                onDeviceGemmaRunner.preWarm()
+            } catch (_: Throwable) {
+                // Pre-warm is best-effort; router will retry on first real turn.
+            }
         }
     }
 

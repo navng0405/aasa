@@ -58,6 +58,12 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
+    // Phase 9: on-device Gemma 4 via LiteRT-LM.
+    // The model file (gemma-4-E2B-it.litertlm) is NOT bundled — it is side-loaded
+    // to /sdcard/Android/data/com.aasa.eldercare/files/models/ via `adb push`.
+    // See AASA_PROJECT_OVERVIEW.md §21.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
+
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -26,6 +26,19 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.Aasa">
+
+        <!--
+          Phase 9: LiteRT-LM GPU backend (optional, not used on Pixel 4a).
+          Declaring these as not required keeps the app installable on devices
+          without them; LiteRT-LM falls back to CPU automatically.
+        -->
+        <uses-native-library
+            android:name="libvndksupport.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
