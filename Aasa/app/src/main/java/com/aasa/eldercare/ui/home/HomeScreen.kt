@@ -85,6 +85,7 @@ fun HomeScreen(
     onScamShieldClick: () -> Unit,
     onFallTriageClick: () -> Unit,
     onMobilityShieldClick: () -> Unit,
+    onHealthBriefingClick: () -> Unit,
     viewModel: HomeViewModel = aasaHomeViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -165,6 +166,8 @@ fun HomeScreen(
             FallTriageEntryCard(onOpen = onFallTriageClick)
 
             MobilityShieldEntryCard(onOpen = onMobilityShieldClick)
+
+            HealthBriefingEntryCard(onOpen = onHealthBriefingClick)
 
             VoiceSection(
                 uiState = uiState,
@@ -259,7 +262,8 @@ fun HomeScreen(
                 onTrustedCircleClick = onTrustedCircleClick,
                 onScamShieldClick = onScamShieldClick,
                 onFallTriageClick = onFallTriageClick,
-                onMobilityShieldClick = onMobilityShieldClick
+                onMobilityShieldClick = onMobilityShieldClick,
+                onHealthBriefingClick = onHealthBriefingClick
             )
         }
     }
@@ -1272,7 +1276,8 @@ private fun NavigationShortcuts(
     onTrustedCircleClick: () -> Unit,
     onScamShieldClick: () -> Unit,
     onFallTriageClick: () -> Unit,
-    onMobilityShieldClick: () -> Unit
+    onMobilityShieldClick: () -> Unit,
+    onHealthBriefingClick: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -1290,6 +1295,7 @@ private fun NavigationShortcuts(
             BigSectionButton(label = "Scam & Fraud Shield", onClick = onScamShieldClick)
             BigSectionButton(label = "Fall Detection & Triage", onClick = onFallTriageClick)
             BigSectionButton(label = "Mobility Shield", onClick = onMobilityShieldClick)
+            BigSectionButton(label = "Morning Briefing", onClick = onHealthBriefingClick)
         }
     }
 }
@@ -1355,6 +1361,53 @@ private fun MobilityShieldEntryCard(onOpen: () -> Unit) {
             ) {
                 Text(
                     text = "Open Mobility Shield",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Phase 10 — Morning Briefing entry card. Mirrors the other
+ * elder-friendly entry cards. The actual screen surfaces a
+ * mandatory "Demo data — no wearable connected" pill when no
+ * wearable is connected.
+ */
+@Composable
+private fun HealthBriefingEntryCard(onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Morning Briefing",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Text(
+                text = "A gentle look at your last 24 hours — sleep, heart rate, and steps. " +
+                    "Wearable-ready (Fitbit Air, Pixel Watch, and others). " +
+                    "On-device, no cloud.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Button(
+                onClick = onOpen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = "Open Morning Briefing",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 )

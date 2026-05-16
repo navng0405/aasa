@@ -6,6 +6,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.aasa.eldercare.ui.falltriage.FallTriageScreen
 import com.aasa.eldercare.ui.home.HomeScreen
+import com.aasa.eldercare.ui.briefing.HealthBriefingScreen
 import com.aasa.eldercare.ui.medication.MedicationScreen
 import com.aasa.eldercare.ui.memory.MemoryScreen
 import com.aasa.eldercare.ui.mobility.MobilityShieldScreen
@@ -20,6 +21,7 @@ object AasaRoutes {
     const val SCAM_SHIELD = "scam_shield"
     const val FALL_TRIAGE = "fall_triage"
     const val MOBILITY_SHIELD = "mobility_shield"
+    const val HEALTH_BRIEFING = "health_briefing"
 }
 
 @Composable
@@ -37,7 +39,8 @@ fun AppNavigation() {
                 onTrustedCircleClick = { navController.navigate(AasaRoutes.TRUSTED_CIRCLE) },
                 onScamShieldClick = { navController.navigate(AasaRoutes.SCAM_SHIELD) },
                 onFallTriageClick = { navController.navigate(AasaRoutes.FALL_TRIAGE) },
-                onMobilityShieldClick = { navController.navigate(AasaRoutes.MOBILITY_SHIELD) }
+                onMobilityShieldClick = { navController.navigate(AasaRoutes.MOBILITY_SHIELD) },
+                onHealthBriefingClick = { navController.navigate(AasaRoutes.HEALTH_BRIEFING) }
             )
         }
         composable(AasaRoutes.MEDICATION) {
@@ -67,6 +70,11 @@ fun AppNavigation() {
         }
         composable(AasaRoutes.MOBILITY_SHIELD) {
             MobilityShieldScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(AasaRoutes.HEALTH_BRIEFING) {
+            HealthBriefingScreen(
                 onBack = { navController.popBackStack() }
             )
         }

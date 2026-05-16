@@ -66,6 +66,15 @@ object ToolResultKeys {
     const val ABRUPT_PAUSES = "abruptPauses"
     const val SMOOTHNESS_SCORE = "smoothnessScore"
     const val DURATION_SECONDS = "durationSeconds"
+
+    // Health Briefing (Phase 10)
+    const val SLEEP_HOURS = "sleepHours"
+    const val AVG_RESTING_HEART_RATE = "avgRestingHeartRateBpm"
+    const val STEPS = "steps"
+    const val SNAPSHOT_SOURCE = "snapshotSource"
+    const val IS_MOCK_DATA = "isMockData"
+    const val BRIEFING_TEXT = "briefingText"
+    const val BRIEFING_HIGHLIGHTS = "briefingHighlights"
 }
 
 /**
@@ -80,6 +89,7 @@ object ToolActionTypes {
     const val SCAM_ANALYSIS = "SCAM_ANALYSIS"
     const val FALL_TRIAGE = "FALL_TRIAGE"
     const val MOBILITY_CHECK = "MOBILITY_CHECK"
+    const val HEALTH_BRIEFING = "HEALTH_BRIEFING"
 }
 
 /**

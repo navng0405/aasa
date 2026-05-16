@@ -8,6 +8,7 @@ import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.MemoryRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
+import com.aasa.eldercare.data.repository.HealthSnapshotRepository
 import com.aasa.eldercare.data.seeder.DemoDataSeeder
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.model.OnDeviceGemmaRunner
@@ -47,11 +48,17 @@ class AasaApplication : Application() {
         ConversationRepository(database.conversationDao())
     }
 
+    /** Phase 10: Health Connect snapshot for the Morning Briefing screen. */
+    val healthSnapshotRepository: HealthSnapshotRepository by lazy {
+        HealthSnapshotRepository(this)
+    }
+
     val toolRegistry: ToolRegistry by lazy {
         ToolRegistry.createDefault(
             medicationRepository = medicationRepository,
             memoryRepository = memoryRepository,
-            trustedContactRepository = trustedContactRepository
+            trustedContactRepository = trustedContactRepository,
+            healthSnapshotRepository = healthSnapshotRepository
         )
     }
 

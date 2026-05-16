@@ -5,6 +5,17 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--
+      Phase 10: Health Connect read-only permissions for the Morning
+      Briefing feature. These are *requested*, not required: if the
+      device has no Health Connect provider or the elder hasn't
+      granted them, HealthSnapshotRepository falls back to mock data
+      and the UI shows a "Demo data — no wearable connected" pill.
+    -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+
+    <!--
       Android 11+ package visibility: without these <queries> entries
       SpeechRecognizer.isRecognitionAvailable() and the TTS engine
       lookup return false / null because the app cannot see the

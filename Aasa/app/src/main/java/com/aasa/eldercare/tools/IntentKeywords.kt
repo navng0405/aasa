@@ -185,6 +185,40 @@ object IntentKeywords {
         return MOBILITY_CHECK_TRIGGERS.any { lower.contains(it) }
     }
 
+    // ----------------------------------------------------------------
+    // Health briefing intent (Phase 10)
+    // ----------------------------------------------------------------
+
+    /**
+     * Triggers a Morning Briefing via HealthBriefingTool. Matches
+     * both spoken phrases the elder might say ("how did I sleep
+     * last night") and the synthetic prompt the Health Briefing
+     * screen sends when the elder taps "Get my briefing".
+     */
+    private val HEALTH_BRIEFING_TRIGGERS: List<String> = listOf(
+        "morning briefing",
+        "morning brief",
+        "daily briefing",
+        "health briefing",
+        "how did i sleep",
+        "how was my sleep",
+        "how am i doing today",
+        "how is my health today",
+        "what's my health like",
+        "whats my health like",
+        "give me my briefing",
+        "give me a briefing",
+        "summarize my health",
+        "summarise my health",
+        // synthetic prompt fired by the Health Briefing screen
+        "generate my morning briefing"
+    )
+
+    fun isHealthBriefingRequest(text: String): Boolean {
+        val lower = text.lowercase()
+        return HEALTH_BRIEFING_TRIGGERS.any { lower.contains(it) }
+    }
+
     /**
      * Best-effort coarse type for a memory derived from the raw user
      * message – used by [com.aasa.eldercare.tools.MemoryTool] when

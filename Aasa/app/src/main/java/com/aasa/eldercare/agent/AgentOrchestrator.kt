@@ -133,6 +133,18 @@ class AgentOrchestrator(
                 arguments = enrichedArgs
             )
 
+            // --- 1c. Health Briefing override (Phase 10) ---------------
+            // Morning briefing / "how did I sleep" phrasing must route
+            // through HealthBriefingTool even when Gemma classifies it
+            // as plain CHAT. Runs after safety so an emergency phrase
+            // mixed in still wins.
+            IntentKeywords.isHealthBriefingRequest(userMessage) -> action.copy(
+                intent = INTENT_HEALTH_BRIEFING,
+                tool = ToolNames.HEALTH_BRIEFING,
+                riskLevel = action.riskLevel.ifBlank { RISK_LOW },
+                arguments = enrichedArgs
+            )
+
             // --- 1b. Scam Shield override -------------------------------
             // Either an explicit "analyze this suspicious message:"
             // request OR raw text the keyword scanner already flags as
@@ -195,6 +207,7 @@ class AgentOrchestrator(
         private const val INTENT_ANALYZE_SCAM = "ANALYZE_SCAM"
         private const val INTENT_FALL_TRIAGE = "FALL_TRIAGE"
         private const val INTENT_MOBILITY_CHECK = "MOBILITY_CHECK"
+        private const val INTENT_HEALTH_BRIEFING = "HEALTH_BRIEFING"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"

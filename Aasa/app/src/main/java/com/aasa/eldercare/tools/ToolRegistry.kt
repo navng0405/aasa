@@ -1,6 +1,7 @@
 package com.aasa.eldercare.tools
 
 import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.data.repository.HealthSnapshotRepository
 import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.MemoryRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
@@ -43,7 +44,8 @@ class ToolRegistry private constructor(
         fun createDefault(
             medicationRepository: MedicationRepository,
             memoryRepository: MemoryRepository,
-            trustedContactRepository: TrustedContactRepository
+            trustedContactRepository: TrustedContactRepository,
+            healthSnapshotRepository: HealthSnapshotRepository
         ): ToolRegistry = ToolRegistry(
             listOf(
                 ChatTool(),
@@ -54,7 +56,8 @@ class ToolRegistry private constructor(
                 ReminderTool(),
                 ScamShieldTool(trustedContactRepository),
                 FallTriageTool(trustedContactRepository),
-                MobilityShieldTool(trustedContactRepository)
+                MobilityShieldTool(trustedContactRepository),
+                HealthBriefingTool(healthSnapshotRepository)
             )
         )
 

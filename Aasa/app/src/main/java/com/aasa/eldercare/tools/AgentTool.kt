@@ -27,4 +27,5 @@ object ToolNames {
     const val SCAM_SHIELD = "ScamShieldTool"
     const val FALL_TRIAGE = "FallTriageTool"
     const val MOBILITY_SHIELD = "MobilityShieldTool"
+    const val HEALTH_BRIEFING = "HealthBriefingTool"
 }

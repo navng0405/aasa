@@ -79,6 +79,11 @@ dependencies {
     // See AASA_PROJECT_OVERVIEW.md §21.
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
 
+    // Phase 10: Android Health Connect — wearable-ready (Fitbit Air, Pixel Watch, etc.).
+    // Read-only access to sleep / heart rate / steps on-device. No cloud APIs.
+    // See AASA_PROJECT_OVERVIEW.md §22.
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
+
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
