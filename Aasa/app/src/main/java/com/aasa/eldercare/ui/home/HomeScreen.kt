@@ -150,8 +150,11 @@ fun HomeScreen(
             HeaderSection()
 
             GemmaStatusCard(
+                selectedMode = uiState.selectedGemmaMode,
                 state = uiState.gemmaConnection,
                 modelLabel = uiState.gemmaModelLabel,
+                detail = uiState.gemmaStatusDetail,
+                onModeSelected = viewModel::selectGemmaMode,
                 onRetry = viewModel::pingGemmaServer
             )
 
@@ -290,8 +293,11 @@ private fun HeaderSection() {
 
 @Composable
 private fun GemmaStatusCard(
+    selectedMode: GemmaRuntimeMode,
     state: GemmaConnectionState,
     modelLabel: String?,
+    detail: String?,
+    onModeSelected: (GemmaRuntimeMode) -> Unit,
     onRetry: () -> Unit
 ) {
     val (statusLabel, dotColor) = when (state) {
@@ -315,6 +321,10 @@ private fun GemmaStatusCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            GemmaModeToggle(
+                selectedMode = selectedMode,
+                onModeSelected = onModeSelected
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -331,12 +341,77 @@ private fun GemmaStatusCard(
                     OutlinedButton(onClick = onRetry) { Text("Retry") }
                 }
             }
-            StatusLine(label = "Mode", value = "Pixel 4a → Mac Local Gemma 4")
+            StatusLine(
+                label = "Mode",
+                value = when (selectedMode) {
+                    GemmaRuntimeMode.ON_DEVICE -> "On-device LiteRT-LM"
+                    GemmaRuntimeMode.MAC_BRIDGE -> "Mac local LLM"
+                }
+            )
             StatusLine(label = "Privacy", value = "No cloud LLM")
             modelLabel?.takeIf { it.isNotBlank() }?.let { name ->
                 StatusLine(label = "Model", value = name)
             }
+            detail?.takeIf { it.isNotBlank() }?.let { reason ->
+                StatusLine(label = "Status", value = reason)
+            }
         }
+    }
+}
+
+@Composable
+private fun GemmaModeToggle(
+    selectedMode: GemmaRuntimeMode,
+    onModeSelected: (GemmaRuntimeMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface),
+        horizontalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        GemmaModeButton(
+            text = "On-device",
+            selected = selectedMode == GemmaRuntimeMode.ON_DEVICE,
+            onClick = { onModeSelected(GemmaRuntimeMode.ON_DEVICE) },
+            modifier = Modifier.weight(1f)
+        )
+        GemmaModeButton(
+            text = "Mac LLM",
+            selected = selectedMode == GemmaRuntimeMode.MAC_BRIDGE,
+            onClick = { onModeSelected(GemmaRuntimeMode.MAC_BRIDGE) },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun GemmaModeButton(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = if (selected) {
+        ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        )
+    } else {
+        ButtonDefaults.outlinedButtonColors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(40.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = colors,
+        elevation = null
+    ) {
+        Text(text = text, maxLines = 1)
     }
 }
 

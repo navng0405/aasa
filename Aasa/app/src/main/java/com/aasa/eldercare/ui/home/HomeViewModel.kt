@@ -7,8 +7,7 @@ import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.repository.ConversationRepository
-import com.aasa.eldercare.network.ApiService
-import com.aasa.eldercare.network.RetrofitClient
+import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
 import com.aasa.eldercare.tools.ToolResultKeys
@@ -35,7 +34,7 @@ import kotlinx.coroutines.launch
  *    after each successful turn.
  *  - the existing Phase 4 conversation flow against [orchestrator]
  *    and [conversationRepository], which is unchanged.
- *  - a periodic Gemma-server health probe that keeps the status card
+ *  - a periodic on-device Gemma health probe that keeps the status card
  *    in sync (Phase 8).
  *
  * Lifecycle: both voice managers are released in [onCleared]. The
@@ -47,7 +46,7 @@ class HomeViewModel(
     private val conversationRepository: ConversationRepository,
     private val speechToTextManager: SpeechToTextManager,
     private val textToSpeechManager: TextToSpeechManager,
-    private val apiService: ApiService,
+    private val gemmaRouter: GemmaRouter,
     private val resetDemoDataAction: suspend () -> Unit
 ) : ViewModel() {
 
@@ -141,8 +140,14 @@ class HomeViewModel(
                         pendingScamSignals = pending.scamSignals,
                         pendingSafeAction = pending.safeAction,
                         pendingScamMessageText = pending.scamMessageText,
-                        // Successful turn = server is reachable.
-                        gemmaConnection = GemmaConnectionState.CONNECTED
+                        gemmaConnection = GemmaConnectionState.CONNECTED,
+                        selectedGemmaMode = if (gemmaRouter.usingBridge) {
+                            GemmaRuntimeMode.MAC_BRIDGE
+                        } else {
+                            GemmaRuntimeMode.ON_DEVICE
+                        },
+                        gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+                        gemmaStatusDetail = null
                     )
                     val spoken = result.action.assistantResponse
                         .ifBlank { result.toolResult.message }
@@ -168,9 +173,9 @@ class HomeViewModel(
                         pendingScamSignals = emptyList(),
                         pendingSafeAction = null,
                         pendingScamMessageText = null,
-                        // Failed network round-trip = mark disconnected
-                        // so the status card reflects reality.
-                        gemmaConnection = GemmaConnectionState.DISCONNECTED
+                        gemmaConnection = GemmaConnectionState.DISCONNECTED,
+                        gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+                        gemmaStatusDetail = error.toReadableMessage()
                     )
                 }
         }
@@ -442,11 +447,11 @@ class HomeViewModel(
     }
 
     // ---------------------------------------------------------------
-    // Phase 8: local Gemma 4 health probe.
+    // Phase 8: on-device Gemma 4 health probe.
     // ---------------------------------------------------------------
 
     /**
-     * Periodically ping the Gemma bridge `/health` endpoint so the
+     * Periodically check the LiteRT-LM model and engine so the
      * status card stays accurate even before the elder sends their
      * first message. The probe loop terminates with [viewModelScope].
      */
@@ -464,6 +469,18 @@ class HomeViewModel(
         viewModelScope.launch { pingGemmaServerInternal() }
     }
 
+    fun selectGemmaMode(mode: GemmaRuntimeMode) {
+        if (_uiState.value.selectedGemmaMode == mode) return
+        gemmaRouter.forceBridge = mode == GemmaRuntimeMode.MAC_BRIDGE
+        _uiState.value = _uiState.value.copy(
+            selectedGemmaMode = mode,
+            gemmaConnection = GemmaConnectionState.CONNECTING,
+            gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+            gemmaStatusDetail = null
+        )
+        viewModelScope.launch { pingGemmaServerInternal() }
+    }
+
     private suspend fun pingGemmaServerInternal() {
         // Don't downgrade to CONNECTING if we're already CONNECTED
         // - that would briefly flicker the badge on every probe.
@@ -472,22 +489,33 @@ class HomeViewModel(
                 gemmaConnection = GemmaConnectionState.CONNECTING
             )
         }
-        runCatching { apiService.checkServer() }
-            .onSuccess { response ->
-                if (response.isSuccessful) {
-                    _uiState.value = _uiState.value.copy(
-                        gemmaConnection = GemmaConnectionState.CONNECTED,
-                        gemmaModelLabel = response.body()?.ollamaModel
-                    )
+        runCatching { gemmaRouter.isSelectedRunnerAvailable() }
+            .onSuccess { available ->
+                val mode = if (gemmaRouter.usingBridge) {
+                    GemmaRuntimeMode.MAC_BRIDGE
                 } else {
-                    _uiState.value = _uiState.value.copy(
-                        gemmaConnection = GemmaConnectionState.DISCONNECTED
-                    )
+                    GemmaRuntimeMode.ON_DEVICE
                 }
-            }
-            .onFailure {
                 _uiState.value = _uiState.value.copy(
-                    gemmaConnection = GemmaConnectionState.DISCONNECTED
+                    selectedGemmaMode = mode,
+                    gemmaConnection = if (available) {
+                        GemmaConnectionState.CONNECTED
+                    } else {
+                        GemmaConnectionState.DISCONNECTED
+                    },
+                    gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+                    gemmaStatusDetail = if (available) {
+                        null
+                    } else {
+                        gemmaRouter.selectedStatusReason
+                    }
+                )
+            }
+            .onFailure { throwable ->
+                _uiState.value = _uiState.value.copy(
+                    gemmaConnection = GemmaConnectionState.DISCONNECTED,
+                    gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+                    gemmaStatusDetail = throwable.toReadableMessage()
                 )
             }
     }
@@ -520,7 +548,7 @@ class HomeViewModel(
                 conversationRepository = application.conversationRepository,
                 speechToTextManager = SpeechToTextManager(application.applicationContext),
                 textToSpeechManager = TextToSpeechManager(application.applicationContext),
-                apiService = RetrofitClient.apiService,
+                gemmaRouter = application.gemmaRouter,
                 resetDemoDataAction = { application.resetDemoData() }
             ) as T
         }

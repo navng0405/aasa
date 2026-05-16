@@ -1,6 +1,7 @@
 package com.aasa.eldercare
 
 import android.app.Application
+import com.aasa.eldercare.BuildConfig
 import com.aasa.eldercare.agent.AgentOrchestrator
 import com.aasa.eldercare.data.AppDatabase
 import com.aasa.eldercare.data.repository.ConversationRepository
@@ -69,7 +70,11 @@ class AasaApplication : Application() {
      * Implements [com.aasa.eldercare.model.ModelRunner] so the orchestrator is unchanged.
      */
     val gemmaRouter: GemmaRouter by lazy {
-        GemmaRouter(onDevice = onDeviceGemmaRunner, bridge = remoteGemmaRunner)
+        GemmaRouter(
+            onDevice = onDeviceGemmaRunner,
+            bridge = remoteGemmaRunner,
+            bridgeEnabled = BuildConfig.AASA_ENABLE_GEMMA_BRIDGE
+        )
     }
 
     val agentOrchestrator: AgentOrchestrator by lazy {

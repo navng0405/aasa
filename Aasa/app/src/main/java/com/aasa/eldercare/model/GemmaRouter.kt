@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Phase 9: picks between on-device Gemma 4 (preferred) and the Mac bridge
- * (dev fallback) on every turn.
+ * Phase 9: picks between on-device Gemma 4 and, only when explicitly enabled,
+ * the Mac bridge dev fallback.
  *
  * Decision rules (in order):
  *  1. If `forceBridge` is true → bridge.
@@ -25,7 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class GemmaRouter(
     private val onDevice: OnDeviceGemmaRunner,
-    private val bridge: ModelRunner
+    private val bridge: ModelRunner,
+    private val bridgeEnabled: Boolean
 ) : ModelRunner {
 
     override val label: String get() = activeRunnerLabel.value
@@ -40,9 +41,29 @@ class GemmaRouter(
 
     @Volatile var forceBridge: Boolean = false
 
+    val usingBridge: Boolean
+        get() = forceBridge
+
+    val selectedRunnerLabel: String
+        get() = if (forceBridge) bridge.label else onDevice.label
+
+    val selectedStatusReason: String?
+        get() = if (forceBridge) {
+            "Mac bridge unreachable. Start FastAPI and use adb reverse or a LAN base URL."
+        } else {
+            onDevice.statusReason
+        }
+
     override suspend fun isAvailable(): Boolean {
-        // The router is available iff at least one underlying runner is.
-        return onDevice.isAvailable() || bridge.isAvailable()
+        return onDevice.isAvailable() || (bridgeEnabled && bridge.isAvailable())
+    }
+
+    suspend fun isSelectedRunnerAvailable(): Boolean {
+        return if (forceBridge) {
+            bridge.isAvailable()
+        } else {
+            onDevice.isAvailable()
+        }
     }
 
     override suspend fun sendMessage(message: String): AgentMessageResponse {
@@ -68,6 +89,14 @@ class GemmaRouter(
                 return resp
             } catch (t: Throwable) {
                 Log.w(TAG, "On-device generation failed, falling back to bridge", t)
+                if (!bridgeEnabled) {
+                    _activeRunnerLabel.value = "On-device unavailable"
+                    _lastRoutingReason.value =
+                        "On-device generation failed (${t.javaClass.simpleName}). Bridge fallback is disabled."
+                    throw IllegalStateException(
+                        "On-device Gemma failed: ${t.message ?: t.javaClass.simpleName}"
+                    )
+                }
                 return runBridge(
                     message,
                     reasonPrefix = "On-device failed (${t.javaClass.simpleName}); fell back to bridge"
@@ -75,7 +104,16 @@ class GemmaRouter(
             }
         }
 
-        // 3) Bridge fallback.
+        if (!bridgeEnabled) {
+            _activeRunnerLabel.value = "On-device unavailable"
+            _lastRoutingReason.value =
+                "On-device unavailable (${onDevice.statusReason ?: "unknown"}). Bridge fallback is disabled."
+            throw IllegalStateException(
+                "On-device Gemma model is not ready. Push the .litertlm file to ${onDevice.expectedModelPath} and restart Aasa."
+            )
+        }
+
+        // 3) Optional bridge fallback.
         return runBridge(
             message,
             reasonPrefix = "On-device unavailable (${onDevice.statusReason ?: "unknown"}); using bridge"
@@ -92,7 +130,11 @@ class GemmaRouter(
             _activeRunnerLabel.value = "Unavailable"
             _lastRoutingReason.value = "$reasonPrefix. Bridge is also unreachable."
             throw IllegalStateException(
-                "No Gemma backend is available. Side-load the model file or start the Mac bridge."
+                if (bridgeEnabled) {
+                    "No Gemma backend is available. Side-load the model file or start the Mac bridge."
+                } else {
+                    "On-device Gemma model is not ready. Push the .litertlm file to ${onDevice.expectedModelPath} and restart Aasa."
+                }
             )
         }
         val resp = bridge.sendMessage(message)

@@ -7,6 +7,17 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val gemmaBaseUrl = providers.gradleProperty("aasaGemmaBaseUrl")
+    .orElse(providers.environmentVariable("AASA_GEMMA_BASE_URL"))
+    .orElse("http://127.0.0.1:8000/")
+    .map { rawUrl ->
+        if (rawUrl.endsWith("/")) rawUrl else "$rawUrl/"
+    }
+val enableGemmaBridge = providers.gradleProperty("aasaEnableGemmaBridge")
+    .orElse(providers.environmentVariable("AASA_ENABLE_GEMMA_BRIDGE"))
+    .orElse("false")
+    .map { it.equals("true", ignoreCase = true) }
+
 android {
     namespace = "com.aasa.eldercare"
     compileSdk = 34
@@ -17,9 +28,12 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1"
+        buildConfigField("String", "AASA_GEMMA_BASE_URL", "\"${gemmaBaseUrl.get()}\"")
+        buildConfigField("boolean", "AASA_ENABLE_GEMMA_BRIDGE", enableGemmaBridge.get().toString())
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 

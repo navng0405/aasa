@@ -47,8 +47,10 @@ data class HomeUiState(
     val pendingScamMessageText: String? = null,
 
     /** Phase 8: local Gemma 4 server health. */
+    val selectedGemmaMode: GemmaRuntimeMode = GemmaRuntimeMode.ON_DEVICE,
     val gemmaConnection: GemmaConnectionState = GemmaConnectionState.UNKNOWN,
     val gemmaModelLabel: String? = null,
+    val gemmaStatusDetail: String? = null,
 
     /**
      * Phase 8: one-shot snackbar text, e.g. "Demo data reset.". The
@@ -90,6 +92,11 @@ enum class GemmaConnectionState {
     CONNECTING,
     CONNECTED,
     DISCONNECTED
+}
+
+enum class GemmaRuntimeMode {
+    ON_DEVICE,
+    MAC_BRIDGE
 }
 
 /**

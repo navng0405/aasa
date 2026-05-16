@@ -19,8 +19,9 @@ import java.io.File
  *
  * The `.litertlm` file is **not** bundled in the APK (it is 2.4 GB and license-gated).
  * Side-load it once per device via:
+ *   adb shell mkdir -p /sdcard/Android/data/com.aasa.eldercare/files/models
  *   adb push gemma-4-E2B-it.litertlm \
- *     /sdcard/Android/data/com.aasa.eldercare/files/models/
+ *     /sdcard/Android/data/com.aasa.eldercare/files/models/gemma-4-E2B-it.litertlm
  *
  * Lifecycle:
  *   - [isAvailable] checks the file is present and lazily initializes the [Engine]
@@ -50,23 +51,36 @@ class OnDeviceGemmaRunner(
      * [Context.getExternalFilesDir] so this works whether the directory has been
      * created by the app yet or pre-created via `adb shell mkdir`.
      */
-    private val modelFile: File by lazy {
-        File(appContext.getExternalFilesDir(null), "models/$MODEL_FILENAME")
+    private val modelsDir: File by lazy {
+        File(appContext.getExternalFilesDir(null), "models")
     }
+
+    private val expectedModelFile: File by lazy {
+        File(modelsDir, MODEL_FILENAME)
+    }
+
+    @Volatile private var selectedModelFile: File? = null
 
     /** Public — read by the UI to explain why on-device is or isn't active. */
     val statusReason: String?
         get() = when {
             initFailed -> initFailReason ?: "engine initialization failed"
-            !modelFile.exists() -> "model file not found at ${modelFile.absolutePath}"
+            resolveModelFile() == null -> "model file not found at ${expectedModelFile.absolutePath}"
             engine == null -> "engine not initialized yet"
             else -> null
         }
 
+    val expectedModelPath: String
+        get() = expectedModelFile.absolutePath
+
     override suspend fun isAvailable(): Boolean = withContext(Dispatchers.IO) {
         if (initFailed) return@withContext false
-        if (!modelFile.exists()) {
-            Log.w(TAG, "Gemma 4 model not found at ${modelFile.absolutePath}")
+        if (resolveModelFile() == null) {
+            modelsDir.mkdirs()
+            Log.w(
+                TAG,
+                "Gemma 4 model not found. Expected $expectedModelFile or any .litertlm in ${modelsDir.absolutePath}"
+            )
             return@withContext false
         }
         ensureEngine()
@@ -125,6 +139,10 @@ class OnDeviceGemmaRunner(
             if (engine != null || initFailed) return
             try {
                 Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
+                val modelFile = resolveModelFile()
+                    ?: throw IllegalStateException(
+                        "Model file missing. Push $MODEL_FILENAME to ${modelsDir.absolutePath}"
+                    )
                 val config = EngineConfig(
                     modelPath = modelFile.absolutePath,
                     backend = Backend.CPU(),
@@ -152,5 +170,23 @@ class OnDeviceGemmaRunner(
 
         /** Exact filename pushed via `adb push`. Do not rename without updating docs. */
         const val MODEL_FILENAME = "gemma-4-E2B-it.litertlm"
+    }
+
+    private fun resolveModelFile(): File? {
+        selectedModelFile?.takeIf { it.exists() }?.let { return it }
+        expectedModelFile.takeIf { it.exists() }?.let {
+            selectedModelFile = it
+            return it
+        }
+        val discovered = modelsDir
+            .listFiles { file -> file.isFile && file.extension.equals("litertlm", ignoreCase = true) }
+            ?.sortedBy { it.name }
+            ?.firstOrNull()
+
+        if (discovered != null) {
+            selectedModelFile = discovered
+            Log.i(TAG, "Using discovered LiteRT-LM model ${discovered.absolutePath}")
+        }
+        return discovered
     }
 }

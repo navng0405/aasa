@@ -1,5 +1,7 @@
 package com.aasa.eldercare.network
 
+import android.util.Log
+import com.aasa.eldercare.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -10,13 +12,17 @@ import java.util.concurrent.TimeUnit
  * Provides a single Retrofit-backed [ApiService] talking to the local Gemma
  * FastAPI bridge running on the developer Mac.
  *
- * The Pixel device reaches the Mac via:
+ * By default, the Pixel device reaches the Mac via:
  *     adb reverse tcp:8000 tcp:8000
  * so from the device's point of view the server lives at 127.0.0.1:8000.
+ *
+ * For Wi-Fi/LAN testing, build with:
+ *     ./gradlew :app:installDebug -PaasaGemmaBaseUrl=http://<mac-ip>:8000/
  */
 object RetrofitClient {
 
-    private const val BASE_URL = "http://127.0.0.1:8000/"
+    private const val TAG = "RetrofitClient"
+    private val baseUrl: String = BuildConfig.AASA_GEMMA_BASE_URL
 
     private val loggingInterceptor: HttpLoggingInterceptor =
         HttpLoggingInterceptor().apply {
@@ -33,8 +39,9 @@ object RetrofitClient {
     }
 
     private val retrofit: Retrofit by lazy {
+        Log.i(TAG, "Gemma bridge base URL: $baseUrl")
         Retrofit.Builder()
-            .baseUrl(BASE_URL)
+            .baseUrl(baseUrl)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
