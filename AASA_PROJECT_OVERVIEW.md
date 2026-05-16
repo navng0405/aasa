@@ -20,7 +20,8 @@ Specific problems the app addresses, in priority order:
 4. **Scam & Fraud Shield** — paste a suspicious SMS / WhatsApp / voicemail-transcript and get a gentle, non-condescending explanation of warning signals (gift-card requests, OTP asks, urgent-money asks) plus a safe next step.
 5. **Trusted Circle** — one primary contact (default seeded as "Priya"). Aasa offers to alert this person on MEDIUM-risk situations and emergency dialer + alert on HIGH-risk.
 6. **Mobility Shield** — a 10-second accelerometer-based walk check that produces a friendly "mobility confidence" score, *explicitly not a medical diagnosis*.
-7. **Local-first privacy** — all persistence is on-device Room. The LLM runs **on the phone itself** via LiteRT-LM (Gemma 4 E2B int4, `gemma-4-E2B-it.litertlm`, ~2.4 GB). The Mac-side Ollama bridge is retained only as a developer fallback. No cloud LLM is ever called.
+7. **Morning Briefing (wearable-ready)** — read-only Health Connect snapshot (sleep, resting heart rate, steps) for the last 24 hours, turned into a gentle, elder-friendly summary. Works with any wearable that writes to Health Connect (Fitbit Air, Pixel Watch, Galaxy Watch). When no wearable is connected, a mandatory **"Demo data — no wearable connected"** pill is surfaced so we never fake real wearable data.
+8. **Local-first privacy** — all persistence is on-device Room. The LLM runs **on the phone itself** via LiteRT-LM (Gemma 4 E2B int4, `gemma-4-E2B-it.litertlm`, ~2.4 GB). The Mac-side Ollama bridge is retained only as a developer fallback. No cloud LLM is ever called.
 
 ## 3. Hard rules / non-negotiables
 
@@ -109,6 +110,7 @@ The codebase carries phase markers in comments and commit messages. Reading the 
 | 8.6 | Fall Triage | `FallDetectionManager`, `FallTriageTool`, `FallTriageKeywords`, `FallTriageScreen` |
 | 8.7 | Mobility Shield | `MobilitySensorManager`, `MobilityFeatureExtractor`, `MobilityShieldTool`, `MobilityShieldScreen` |
 | 9   | **On-device Gemma 4 via LiteRT-LM** | `model/GemmaRunner`, `OnDeviceGemmaRunner`, `RemoteGemmaRunner`, `GemmaRouter`, `OnDevicePromptBuilder`. Bridge demoted to dev fallback. |
+| 10  | **Morning Briefing (Health Connect, wearable-ready)** | `data/repository/HealthSnapshotRepository`, `tools/HealthBriefingTool`, `ui/briefing/HealthBriefingScreen`, `ui/briefing/HealthBriefingViewModel`. Read-only Health Connect access, mandatory demo-data pill, on-device summarization. |
 
 ## 7. The agent flow (one user turn end-to-end)
 
@@ -134,6 +136,7 @@ Lives in `AgentOrchestrator.applyDeterministicOverrides(userMessage, action)`. *
 1.  HIGH safety phrase               → SafetyTool / HIGH
 1.  MEDIUM safety phrase             → SafetyTool / MEDIUM
 1b. Scam analysis trigger            → ScamShieldTool / ANALYZE_SCAM
+1c. Health briefing trigger          → HealthBriefingTool / HEALTH_BRIEFING
 2.  Medication check query           → MedicationTool / CHECK_MEDICATION
 2.  Medication log statement         → MedicationTool / LOG_MEDICATION
 3.  Memory save statement            → MemoryTool / SAVE_MEMORY
@@ -153,7 +156,7 @@ Why substrings, not regex? Substrings are easier to reason about and less likely
 
 **Risk aggregation rule everywhere**: take the *worst* of `(deterministic phrase scan, Gemma's risk level)`. We never downgrade. See `SafetyTool`, `FallTriageTool`, `MobilityShieldTool`.
 
-## 9. Tool catalog (all 9 `AgentTool`s)
+## 9. Tool catalog (all 10 `AgentTool`s)
 
 Every tool implements `interface AgentTool { val name; suspend fun execute(action: AgentAction): ToolResult }`. Tool names live in `tools/AgentTool.kt#ToolNames`.
 
@@ -168,6 +171,7 @@ Every tool implements `interface AgentTool { val name; suspend fun execute(actio
 | `ScamShieldTool` | `ScamShieldTool` | No | **Yes** — `SCAM_ANALYSIS` |
 | `FallTriageTool` | `FallTriageTool` | No | **Yes** — `FALL_TRIAGE` |
 | `MobilityShieldTool` | `MobilityShieldTool` | No | **Yes** — `MOBILITY_CHECK` |
+| `HealthBriefingTool` | `HealthBriefingTool` | No | **Yes** — `HEALTH_BRIEFING` (rendered on the Morning Briefing screen) |
 
 Per-tool notes worth knowing:
 
@@ -177,6 +181,7 @@ Per-tool notes worth knowing:
 - **`FallTriageTool`** — combines Gemma's `triageCategory` with `FallTriageKeywords.classify()` via "worst wins". Always returns `success=true` so the UI can render the triage card even with no contact, with a friendly "no trusted contact set up" message appended.
 - **`MobilityShieldTool`** — score 0–100, `LOW ≥ 80`, `MEDIUM 60–79`, `HIGH < 60`. Echoes `featureSummary` back to the UI for the bar-chart-y card.
 - **`ScamShieldTool`** — strips `"analyze this suspicious message:"` prefixes via `ScamKeywords.extractMessageText()`, then scans for HIGH signals (gift card / OTP / wire transfer / urgent money / "don't tell family") and MEDIUM (suspicious link / account locked).
+- **`HealthBriefingTool`** (Phase 10) — reads the last-24h snapshot from `HealthSnapshotRepository` (sleep hours, average resting heart rate, total steps) and produces a gentle, on-device summary. When Health Connect is unavailable, not installed, or permissions weren't granted, the repository returns a mock snapshot with `isMockData = true` so the UI **must** show the "Demo data — no wearable connected" pill. No medical claims; the summary always ends with "This is just a friendly check-in, not a medical opinion."
 
 `ToolResult.data` keys are constants in `tools/ToolResult.kt#ToolResultKeys`. UI action types are constants in `ToolActionTypes`. **Never use string literals** for these in new code.
 
@@ -219,8 +224,8 @@ Both managers explicitly: never run in background, never persist raw samples to 
 
 `Aasa/app/src/main/java/com/aasa/eldercare/ui/`
 
-- `AppNavigation.kt` — Compose `NavHost` with seven routes:
-  - `home` (default), `medication`, `memory`, `trusted_circle`, `scam_shield`, `fall_triage`, `mobility_shield`
+- `AppNavigation.kt` — Compose `NavHost` with eight routes:
+  - `home` (default), `medication`, `memory`, `trusted_circle`, `scam_shield`, `fall_triage`, `mobility_shield`, `health_briefing`
 - `home/HomeScreen.kt` (~1500 LOC) — the "command center". Hosts:
   - mic button + recognized-speech card
   - text input + sample chips (`DemoScenarios.ALL`)
@@ -270,6 +275,7 @@ adb shell am start -n com.aasa.eldercare/.MainActivity
 
 **Permissions to grant on the device first run:**
 - `RECORD_AUDIO` (mic)
+- *Optional* — Health Connect read access for **Sleep**, **Heart Rate**, **Steps** (Phase 10). Granted from the Morning Briefing screen via the "Grant Health Connect access" button. If skipped, the Morning Briefing still works and surfaces the mandatory "Demo data — no wearable connected" pill.
 
 **Re-seed demo data:** tap "Reset demo data" on the Home screen, or:
 ```bash
@@ -298,6 +304,8 @@ adb uninstall com.aasa.eldercare && ./gradlew :app:installDebug
 - **Coroutines**: `1.7.3`.
 - **Networking**: Retrofit `2.9.0` + Gson converter, OkHttp logging interceptor `4.12.0`.
 - **Room**: `2.6.1` (runtime + ktx + KSP compiler).
+- **On-device LLM**: `com.google.ai.edge.litertlm:litertlm-android:0.11.0` (Phase 9).
+- **Health Connect**: `androidx.health.connect:connect-client:1.1.0-alpha07` (Phase 10, read-only).
 - **No Hilt / Dagger / Koin** — DI is the hand-rolled `AasaApplication` service locator.
 
 ## 18. Things deliberately *not* yet done
@@ -419,4 +427,71 @@ If the file is absent the app boots fine, but model turns remain mobile-only and
 
 ---
 
-*Last updated: Phase 9 — on-device Gemma 4 via LiteRT-LM (`gemma-4-E2B-it.litertlm`).*
+## 22. Phase 10 — Morning Briefing (Health Connect, wearable-ready)
+
+Aasa now offers a **Morning Briefing**: a gentle, on-device summary of the last 24 hours of sleep, resting heart rate, and steps, read from **Android Health Connect** (wearable-agnostic — Fitbit Air, Pixel Watch, Galaxy Watch, etc. all write into the same on-device store).
+
+This phase is intentionally tightly scoped. It is **one tool, one repository, one screen, one deterministic override** — no schema changes, no background jobs, no auto-syncing.
+
+### Hard rules
+
+- **No medical claims.** Copy is gentle and informational only. The briefing always closes with "This is just a friendly check-in, not a medical opinion."
+- **Mandatory demo-data pill.** When no wearable is connected (Health Connect not installed, permissions not granted, or no data in the last 24 h), the Morning Briefing screen **must** show the pill "**Demo data — no wearable connected**". We never present fake numbers as if they came from a real wearable.
+- **Read-only and on-device.** No data is written back to Health Connect. The snapshot never leaves the phone. The summary is generated by the on-device Gemma 4 turn + a deterministic text builder.
+- **Non-fatal everywhere.** If Health Connect is missing, the permission dialog fails, or any read throws, the repository quietly falls back to a deterministic mock snapshot.
+
+### Components
+
+| File | Role |
+|---|---|
+| `data/repository/HealthSnapshotRepository.kt` | Reads sleep / heart rate / steps from Health Connect for the last 24 h. Returns `HealthSnapshot(sleepHours, avgRestingHeartRateBpm, steps, capturedAtEpochMs, isMockData, source)`. Falls back to a mock snapshot when Health Connect is unavailable, ungranted, or empty. |
+| `tools/HealthBriefingTool.kt` | `AgentTool` named `ToolNames.HEALTH_BRIEFING`. Calls the repository, builds `highlights: List<String>` plus a multi-sentence `briefing: String`, returns a `ToolResult` with `actionType = HEALTH_BRIEFING`, `isMockData`, and the three raw numbers. |
+| `tools/IntentKeywords.kt#isHealthBriefingRequest` | Substring scan for morning-briefing phrasings (`"morning briefing"`, `"how did I sleep"`, `"how am I doing today"`, the synthetic `"Generate my morning briefing"` prompt, etc.). |
+| `agent/AgentOrchestrator.kt` | New override rule **1c — Health Briefing**, routed *after* safety so an emergency phrase still wins. |
+| `ui/briefing/HealthBriefingScreen.kt` | Compose screen: intro card, mandatory wearable-status pill, optional "Grant Health Connect access" card, big "Get my briefing" button, result card with highlights + paragraph, disclaimer footer. |
+| `ui/briefing/HealthBriefingViewModel.kt` | Fires the synthetic prompt `"Generate my morning briefing."` through `AgentOrchestrator`. The deterministic override always routes it to `HealthBriefingTool`, so the on-device Gemma 4 turn is decorative — the real numbers come from Health Connect. |
+| `ui/AppNavigation.kt` | New route `health_briefing` + composable wiring. |
+| `ui/home/HomeScreen.kt` | New `HealthBriefingEntryCard` plus a "Morning Briefing" entry in `NavigationShortcuts`. |
+| `AasaApplication.kt` | Adds `healthSnapshotRepository` lazy, wires it into `ToolRegistry.createDefault(...)`. |
+| `AndroidManifest.xml` | Adds the three Health Connect read permissions: `android.permission.health.READ_SLEEP`, `READ_HEART_RATE`, `READ_STEPS`. |
+| `app/build.gradle.kts` | Adds `androidx.health.connect:connect-client:1.1.0-alpha07`. |
+
+### How a Morning Briefing turn flows
+
+1. Elder taps **Open Morning Briefing** on Home → screen pushes route `health_briefing`.
+2. Elder taps **Get my briefing**.
+3. `HealthBriefingViewModel.generateBriefing()` calls `AgentOrchestrator.handleUserMessage("Generate my morning briefing.")`.
+4. Orchestrator runs the deterministic overrides; rule 1c matches → routes to `HealthBriefingTool` regardless of what Gemma classified the prompt as.
+5. `HealthBriefingTool.execute(...)`:
+   - Calls `HealthSnapshotRepository.fetchLast24h()`.
+   - Builds `highlights` (e.g. `"Sleep: 6.2 hours last night"`).
+   - Builds a 3–5 sentence `briefing` string with gentle, non-medical phrasing.
+   - Returns a `ToolResult` with `data["isMockData"]`, the raw numbers, `briefingText`, and `briefingHighlights`.
+6. `HealthBriefingViewModel` unpacks the `ToolResult.data` into `HealthBriefingUiState`.
+7. The screen renders:
+   - "**Demo data — no wearable connected**" pill if `isMockData == true`, otherwise a green "Live data from Health Connect" pill.
+   - A briefing card with bullet highlights + the paragraph.
+   - A disclaimer footer.
+
+The same prompts also work from the Home chat box — typing `morning briefing`, `how did I sleep`, or `how am I doing today` triggers the same tool via the deterministic override.
+
+### Wearable path (real data)
+
+Aasa does **not** integrate with any wearable SDK directly. Every supported wearable (Fitbit Air, Pixel Watch, Galaxy Watch, etc.) writes into Android Health Connect via its own companion app; Aasa reads from there. This means:
+
+- The repository is wearable-agnostic — no Fitbit-specific code, no Google Fit fallback, no vendor SDKs.
+- For real data on a device, the elder must (a) have a wearable companion app installed that writes to Health Connect, and (b) grant Aasa the three read permissions on the Morning Briefing screen.
+- For the hackathon demo we explicitly use the **mock snapshot path** — no real wearable is required, and the "Demo data" pill makes that obvious.
+
+### What is *not* done in Phase 10 (and intentionally so)
+
+- **No background sync / no notifications.** The briefing is pull-on-demand only; we don't schedule a daily push.
+- **No Health Connect history beyond 24 h.** The repository explicitly windows to the last 24 h.
+- **No write-back.** Aasa never writes to Health Connect.
+- **No vendor SDKs** (Fitbit Web API, Google Fit, Samsung Health, etc.). Health Connect is the only path.
+- **No vitals beyond sleep / HR / steps.** SpO2, HRV, blood glucose, etc. are out of scope.
+- **No Room persistence of snapshots.** Each briefing turn reads fresh; we don't store historical wearable data.
+
+---
+
+*Last updated: Phase 10 — Morning Briefing (Health Connect, wearable-ready).*
