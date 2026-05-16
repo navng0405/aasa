@@ -18,6 +18,17 @@ val enableGemmaBridge = providers.gradleProperty("aasaEnableGemmaBridge")
     .orElse("false")
     .map { it.equals("true", ignoreCase = true) }
 
+// Phase 12: opt-in "Hey Aasa" wake-word foreground service. Default OFF
+// because it (a) keeps the microphone open while idle and (b) violates
+// the "no background sensing" non-negotiable from AASA_PROJECT_OVERVIEW.md §3
+// unless the elder has explicitly opted in. Enable with:
+//   ./gradlew :app:installDebug -PaasaEnableHotword=true
+// or env: AASA_ENABLE_HOTWORD=true.
+val enableHotword = providers.gradleProperty("aasaEnableHotword")
+    .orElse(providers.environmentVariable("AASA_ENABLE_HOTWORD"))
+    .orElse("false")
+    .map { it.equals("true", ignoreCase = true) }
+
 android {
     namespace = "com.aasa.eldercare"
     compileSdk = 34
@@ -30,6 +41,7 @@ android {
         versionName = "0.1"
         buildConfigField("String", "AASA_GEMMA_BASE_URL", "\"${gemmaBaseUrl.get()}\"")
         buildConfigField("boolean", "AASA_ENABLE_GEMMA_BRIDGE", enableGemmaBridge.get().toString())
+        buildConfigField("boolean", "AASA_ENABLE_HOTWORD", enableHotword.get().toString())
     }
 
     buildFeatures {

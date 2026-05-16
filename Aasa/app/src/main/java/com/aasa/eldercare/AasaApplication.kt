@@ -9,6 +9,7 @@ import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.MemoryRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
 import com.aasa.eldercare.data.repository.HealthSnapshotRepository
+import com.aasa.eldercare.data.preferences.UserPreferences
 import com.aasa.eldercare.data.seeder.DemoDataSeeder
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.model.OnDeviceGemmaRunner
@@ -51,6 +52,11 @@ class AasaApplication : Application() {
     /** Phase 10: Health Connect snapshot for the Morning Briefing screen. */
     val healthSnapshotRepository: HealthSnapshotRepository by lazy {
         HealthSnapshotRepository(this)
+    }
+
+    /** Phase 11: personalization (user name, last-greeted timestamp). */
+    val userPreferences: UserPreferences by lazy {
+        UserPreferences(this)
     }
 
     val toolRegistry: ToolRegistry by lazy {

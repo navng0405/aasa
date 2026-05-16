@@ -495,3 +495,158 @@ Aasa does **not** integrate with any wearable SDK directly. Every supported wear
 ---
 
 *Last updated: Phase 10 — Morning Briefing (Health Connect, wearable-ready).*
+
+---
+
+## 23. Phase 11 — Personalized launch greeting ("Good morning, Naveen.")
+
+Aasa now opens every session with a warm, time-of-day-aware, name-personalized spoken greeting — the agent feels like a caregiver picking up the phone, not a chatbot waiting for input.
+
+### What it does
+
+When the Home screen comes into the foreground (cold launch, or re-entry after a 5-minute idle):
+
+1. Look up the elder's stored name from `UserPreferences` (defaults to `"friend"`).
+2. Classify the current local hour into MORNING / AFTERNOON / EVENING / NIGHT (`GreetingBuilder.classifyHour`).
+3. Pick a random opener + check-in line from the matching copy bank, e.g. *"Good morning, Naveen. How are you feeling today?"*
+4. Speak it via the existing `TextToSpeechManager`.
+5. If mic permission is already granted, automatically start `SpeechToTextManager` the moment TTS finishes (`TtsEvent.Done`) — the elder can answer hands-free with zero taps.
+6. Stamp `lastGreetingAtMs` so back-nav / config changes inside the same session don't re-greet.
+
+### Hard rule about the wake-word
+
+The user originally asked for a true *"Hey Aasa"* always-on hotword that wakes the device. That **was deliberately not implemented** because both production paths violate the project's non-negotiables (§3):
+
+- *Always-on foreground service holding the mic* → breaks "No background sensing."
+- *Continuous on-device hotword model* → still needs the mic open all the time, same problem; also unproven privacy story.
+- *Cloud hotword (Alexa-style)* → breaks "Local-first privacy. No cloud LLM."
+
+Instead Phase 11 ships the **Google-Assistant-mediated launch path**: the manifest now registers `MainActivity` for `ACTION_ASSIST` and `ACTION_VOICE_COMMAND`, so any voice front-end (Google Assistant, Pixel Squeeze, Bixby, launcher voice search) can open Aasa with one phrase like *"Open Aasa"* or *"Hey Google, Aasa"*. The hotword stays inside the OS-level assistant process; **Aasa itself never holds an always-on mic**. Once Aasa is foregrounded, the Phase 11 greeting + auto-listen flow takes over.
+
+A true `"Hey Aasa"` hotword is queued as future work behind a clearly-labeled `ALLOW_BACKGROUND_HOTWORD` build flag with an opt-in onboarding screen — same shape as the `AASA_ENABLE_GEMMA_BRIDGE` dev fallback.
+
+### Files
+
+| File | Role |
+|---|---|
+| `data/preferences/UserPreferences.kt` | App-private `SharedPreferences` store for `userName` + `lastGreetingAtMs`. Default name is `"friend"`; default cool-down is 5 min. |
+| `agent/GreetingBuilder.kt` | Pure, testable copy generator. `build(userName, hourOfDay, random)` → one human-sounding line. Copy banks have 3–6 variants per time-of-day so repeat opens don't feel canned. **Never names medical conditions** (rule §3). |
+| `ui/home/HomeViewModel.kt` | New `maybeGreetUser(force)` / `updateUserName(name)` methods. The TTS observer flips `autoListenAfterGreeting` so `TtsEvent.Done` chains into `startListening()` when mic permission is already granted. |
+| `ui/home/HomeScreen.kt` | New `UserNameCard` (edit name + "Replay greeting" button). `LaunchedEffect(Unit)` calls `maybeGreetUser()` after the mic permission probe so the post-greeting auto-listen decision is correct. |
+| `AndroidManifest.xml` | `MainActivity` now also handles `android.intent.action.ASSIST` and `android.intent.action.VOICE_COMMAND` so OS-level voice front-ends can launch it. |
+| `AasaApplication.kt` | Exposes `userPreferences: UserPreferences` for the Factory. |
+
+### Design properties worth knowing
+
+- **No new permissions.** Reuses `RECORD_AUDIO` from Phase 6; no `WAKE_LOCK`, no `FOREGROUND_SERVICE`, no boot receiver.
+- **No new long-lived state.** Everything fits in `SharedPreferences` + an in-process bool. No Room table.
+- **Greetings are not stored as conversation turns.** They're spoken-only — they don't pollute `conversations`, don't show up in "Recent conversations", and don't go through `AgentOrchestrator`. This is intentional: a hello isn't a tool call.
+- **Cool-down is per-process AND per-preference.** `greetingSpoken` (in-process bool) prevents re-greet on config change. `shouldGreet(now)` prevents re-greet inside 5 min across navigations / app-switcher resumes.
+- **"Replay greeting" is a demo affordance.** Lets you verify the morning / afternoon / evening branches without restarting the app.
+
+### What is *not* done in Phase 11
+
+- True always-on `"Hey Aasa"` hotword (see rationale above).
+- Locale-aware greeting copy (only English banks exist). Phase 12 candidate.
+- Persisted "How are you feeling?" sentiment loop — the greeting question is open-ended but the model has no special memory of how the elder said they were doing on previous days.
+- Greeting in `MainActivity.onNewIntent` for the `ACTION_ASSIST` path specifically. Today the greeting fires whenever `HomeScreen`'s `LaunchedEffect(Unit)` runs, which covers the assistant deep-link path *and* the launcher icon path uniformly.
+
+---
+
+*Last updated: Phase 11 — personalized launch greeting + assist-app voice-launch entry point.*
+
+---
+
+## 24. Phase 12 — Opt-in "Hey Aasa" wake word (hackathon-grade)
+
+Phase 11 left the always-on wake word as future work because it conflicts with the "no background sensing" non-negotiable (§3). Phase 12 ships it **as an opt-in, gated behind both a build flag and an explicit user toggle**, so the safe default is unchanged.
+
+### How to turn it on
+
+```bash
+cd Aasa
+./gradlew :app:installDebug -PaasaEnableHotword=true
+# or: AASA_ENABLE_HOTWORD=true ./gradlew :app:installDebug
+```
+
+Then on the device:
+
+1. Launch Aasa. A new **"Hey Aasa wake word"** card appears on Home (only present in hotword-enabled builds).
+2. Flip the switch. Grant `RECORD_AUDIO` and (on Android 13+) `POST_NOTIFICATIONS`.
+3. A persistent **"Aasa is listening for 'Hey Aasa'"** notification appears.
+4. Say *"Hey Aasa"* (or *"OK Aasa"*, or just *"Aasa"*). `MainActivity` is launched, the Phase 11 greeting fires, and the mic opens for the elder's reply.
+
+To turn it off: flip the switch back, or tap **Stop** in the notification, or swipe the app away (the service calls `stopSelf()` from `onTaskRemoved`).
+
+### Architecture
+
+```
+              ┌────────────────────────────────────┐
+              │ HomeScreen "Hey Aasa wake word"    │
+              │ card  (only shown if hotword build)│
+              └──────────────┬─────────────────────┘
+                             │ toggle on
+                             ▼
+              ┌────────────────────────────────────┐
+              │ HomeViewModel.setHotwordEnabled()  │
+              │  - persists to UserPreferences     │
+              │  - HotwordService.start(context)   │
+              └──────────────┬─────────────────────┘
+                             ▼
+        ┌────────────────────────────────────────────────┐
+        │ HotwordService (FOREGROUND_SERVICE_MICROPHONE) │
+        │  - persistent notification (Stop action)       │
+        │  - SpeechRecognizer re-listen loop             │
+        │  - substring scan: "hey aasa" / "ok aasa" /    │
+        │    "okay aasa" / "aasa" / "hey asa"            │
+        └──────────────┬─────────────────────────────────┘
+                       │ wake phrase matched
+                       ▼
+        ┌────────────────────────────────────────────────┐
+        │ startActivity(MainActivity, FLAG_NEW_TASK)     │
+        │ → HomeScreen.LaunchedEffect(Unit)              │
+        │ → viewModel.maybeGreetUser()                   │
+        │ → TTS "Good morning, Naveen…"                  │
+        │ → on TtsEvent.Done → startListening()          │
+        └────────────────────────────────────────────────┘
+```
+
+### Files
+
+| File | Role |
+|---|---|
+| `app/build.gradle.kts` | New `aasaEnableHotword` Gradle property → `BuildConfig.AASA_ENABLE_HOTWORD` (default `false`). |
+| `AndroidManifest.xml` | New `<uses-permission>` for `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`. New `<service>` entry `.voice.HotwordService` with `foregroundServiceType="microphone"`. |
+| `voice/HotwordService.kt` | The foreground service. Runs `SpeechRecognizer` in a re-listen loop, scans for `WAKE_PHRASES`, launches `MainActivity` on a match. Stops itself on `ACTION_STOP` or `onTaskRemoved`. |
+| `data/preferences/UserPreferences.kt` | New `hotwordEnabled: Boolean` flag so the elder's opt-in survives reboot / process death. |
+| `ui/home/HomeViewModel.kt` | `setHotwordEnabled(Boolean)` (persists + starts/stops service), `clearHotwordError()`, auto-restart on `setMicPermissionGranted(true)` when previously opted in. |
+| `ui/home/HomeUiState.kt` | New `hotwordSupported` / `hotwordEnabled` / `hotwordError` fields. |
+| `ui/home/HomeScreen.kt` | New `HotwordCard` (Switch + honest-trade-offs copy) + a permission launcher for `POST_NOTIFICATIONS` on Android 13+. |
+
+### Honest trade-offs (these matter)
+
+This is **not** Google-Assistant-quality hotword detection. The implementation is built on Android's stock `SpeechRecognizer`, not a dedicated keyword-spotting model (Porcupine, Picovoice, custom TFLite KWS, etc.).
+
+Real limits that are documented in the UI:
+
+- **Battery cost**: ~5–10 %/h while active. Mitigated only by the cool-down between recognitions.
+- **No Doze resilience**: after enough idle time the OS will throttle or pause the service. The elder is told to fall back to *"Hey Google, open Aasa"*.
+- **False positives**: substring `"aasa"` will trip on `"Asia"`, `"asa"`, etc. (Same trade-off pattern as `tools/SafetyKeywords.kt`, §8.) The trigger list is small on purpose so it can be reviewed line-by-line.
+- **No on-device keyword model**: there is no acoustic-only wake-word path; the full `SpeechRecognizer` is invoked. Some OEM implementations refuse to run from a background service — the service fails fast on those.
+- **Mandatory visible notification**: Android 14 FGS rules require the persistent notification. We treat that as a feature, not a bug: the elder always sees that the mic is hot.
+
+### What's still queued
+
+- **Real on-device KWS** (Porcupine / Picovoice / custom TFLite). Would dramatically lower battery cost and false-positive rate. Hard blocker: license and model availability for "Aasa" as a custom wake word.
+- **Wake-word event → conversation history**. Today the service launches the activity but doesn't record "user said wake word" anywhere; the Phase 11 greeting is the only signal.
+- **Per-time-of-day quiet hours** so the service auto-pauses at night.
+
+### Updated non-negotiable
+
+The "No background sensing" rule from §3 now reads more precisely:
+
+> *Background sensing is OFF by default. Any background-sensing capability must be (a) gated behind a build-time flag, (b) require an explicit opt-in toggle inside the app, AND (c) surface a persistent notification while running. Phase 12's `HotwordService` is the first feature to meet all three.*
+
+---
+
+*Last updated: Phase 12 — opt-in "Hey Aasa" wake-word foreground service.*

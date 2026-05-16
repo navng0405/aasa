@@ -5,6 +5,17 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--
+      Phase 12: opt-in "Hey Aasa" wake-word foreground service.
+      These are declared so the build is self-consistent when the
+      AASA_ENABLE_HOTWORD build flag is on; the service is only
+      started after explicit user opt-in (HomeViewModel.setHotwordEnabled).
+      See AASA_PROJECT_OVERVIEW.md §24.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
       Phase 10: Health Connect read-only permissions for the Morning
       Briefing feature. These are *requested*, not required: if the
       device has no Health Connect provider or the elder hasn't
@@ -58,7 +69,40 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+              Phase 11: voice-launch entry point.
+
+              Real always-on hotword detection ("Hey Aasa") would
+              require a persistent foreground service or Google
+              Assistant integration — both violate the project's
+              "no background sensing / local-first" rules
+              (AASA_PROJECT_OVERVIEW.md §3). Instead we register as
+              an ASSIST-capable app so the elder can say
+              "Hey Google, open Aasa" (or use any launcher voice
+              command) and land directly on the Home screen, which
+              then speaks the time-of-day greeting and opens the mic.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+
+        <!--
+          Phase 12: opt-in "Hey Aasa" wake-word foreground service.
+          Only ever started after the elder flips the opt-in toggle
+          on Home (HomeViewModel.setHotwordEnabled). Posts a persistent
+          notification while running, per Android FGS rules.
+        -->
+        <service
+            android:name=".voice.HotwordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>

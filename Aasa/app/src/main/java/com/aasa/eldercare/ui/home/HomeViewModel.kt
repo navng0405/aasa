@@ -1,16 +1,21 @@
 package com.aasa.eldercare.ui.home
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aasa.eldercare.AasaApplication
+import com.aasa.eldercare.BuildConfig
 import com.aasa.eldercare.agent.AgentOrchestrator
+import com.aasa.eldercare.agent.GreetingBuilder
 import com.aasa.eldercare.data.entity.ConversationEntity
+import com.aasa.eldercare.data.preferences.UserPreferences
 import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
 import com.aasa.eldercare.tools.ToolResultKeys
+import com.aasa.eldercare.voice.HotwordService
 import com.aasa.eldercare.voice.SpeechEvent
 import com.aasa.eldercare.voice.SpeechToTextManager
 import com.aasa.eldercare.voice.TextToSpeechManager
@@ -47,11 +52,29 @@ class HomeViewModel(
     private val speechToTextManager: SpeechToTextManager,
     private val textToSpeechManager: TextToSpeechManager,
     private val gemmaRouter: GemmaRouter,
+    private val userPreferences: UserPreferences,
+    private val appContext: Context,
     private val resetDemoDataAction: suspend () -> Unit
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(HomeUiState())
+    private val _uiState = MutableStateFlow(
+        HomeUiState(
+            userName = userPreferences.userName,
+            hotwordSupported = BuildConfig.AASA_ENABLE_HOTWORD,
+            hotwordEnabled = BuildConfig.AASA_ENABLE_HOTWORD && userPreferences.hotwordEnabled
+        )
+    )
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    /**
+     * Set once the greeting TTS has finished, so the speech-event
+     * collector knows the next [SpeechEvent.Recognized] is the
+     * elder's reply to the greeting (no special handling needed,
+     * but we use this to gate the auto-listen-after-greeting flow
+     * so it only fires once per launch).
+     */
+    private var greetingSpoken: Boolean = false
+    private var autoListenAfterGreeting: Boolean = false
 
     /** Live feed of recent conversation rows; survives process death. */
     val recentConversations: StateFlow<List<ConversationEntity>> =
@@ -66,6 +89,7 @@ class HomeViewModel(
         observeSpeechEvents()
         observeTtsEvents()
         startHealthProbe()
+        autoStartHotwordIfOptedIn()
     }
 
     // ---------------------------------------------------------------
@@ -331,6 +355,12 @@ class HomeViewModel(
                 null
             }
         )
+        // Phase 12: if the elder previously opted in to "Hey Aasa"
+        // and we now know the mic permission is granted, (re-)start
+        // the service. No-op if either pre-condition isn't met.
+        if (granted) {
+            maybeStartHotwordService()
+        }
     }
 
     /**
@@ -439,8 +469,25 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             textToSpeechManager.events.collect { event ->
-                if (event is TtsEvent.Error) {
-                    _uiState.value = _uiState.value.copy(voiceError = event.message)
+                when (event) {
+                    is TtsEvent.Error -> {
+                        _uiState.value = _uiState.value.copy(voiceError = event.message)
+                    }
+                    TtsEvent.Done -> {
+                        // Phase 11: after the launch greeting finishes,
+                        // open the mic automatically so the elder can
+                        // reply hands-free without tapping anything.
+                        if (autoListenAfterGreeting) {
+                            autoListenAfterGreeting = false
+                            if (_uiState.value.hasMicPermission &&
+                                !_uiState.value.isListening &&
+                                !_uiState.value.isLoading
+                            ) {
+                                startListening()
+                            }
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }
@@ -529,6 +576,146 @@ class HomeViewModel(
     private fun Throwable.toReadableMessage(): String =
         message?.takeIf { it.isNotBlank() } ?: this::class.java.simpleName
 
+    // ---------------------------------------------------------------
+    // Phase 11: launch greeting + name personalization.
+    // ---------------------------------------------------------------
+
+    /**
+     * Speak a warm, time-of-day-aware greeting the first time the
+     * Home screen is composed in a session (or after a cool-down).
+     * Called from [com.aasa.eldercare.ui.home.HomeScreen]'s
+     * `LaunchedEffect(Unit)` once mic permission has been resolved.
+     *
+     * If the user already has mic permission, we also flip the
+     * "auto-listen after greeting" flag so the elder can answer the
+     * "How are you feeling?" question hands-free.
+     */
+    fun maybeGreetUser(force: Boolean = false) {
+        if (greetingSpoken && !force) return
+        val now = System.currentTimeMillis()
+        if (!force && !userPreferences.shouldGreet(now)) {
+            // Within the cool-down window — silently skip but mark
+            // the in-process flag so we don't re-check every recomp.
+            greetingSpoken = true
+            return
+        }
+        val name = userPreferences.userName
+        val greeting = GreetingBuilder.build(userName = name)
+        greetingSpoken = true
+        autoListenAfterGreeting = _uiState.value.hasMicPermission
+        userPreferences.markGreeted(now)
+        textToSpeechManager.speak(greeting)
+    }
+
+    /**
+     * Persist a new display name for the elder. Empty / blank values
+     * fall back to the default ("friend"). The greeting picks up the
+     * change on the next launch (or via [maybeGreetUser(force = true)]).
+     */
+    fun updateUserName(newName: String) {
+        val cleaned = newName.trim()
+        userPreferences.userName = cleaned.ifBlank { UserPreferences.DEFAULT_NAME }
+        _uiState.value = _uiState.value.copy(userName = userPreferences.userName)
+    }
+
+    // ---------------------------------------------------------------
+    // Phase 12: "Hey Aasa" wake-word opt-in.
+    // ---------------------------------------------------------------
+
+    /**
+     * Flip the always-on wake-word foreground service on or off.
+     *
+     * Pre-condition for `enabled = true`:
+     *  - the build was made with `-PaasaEnableHotword=true`
+     *  - mic permission is already granted (the screen requests it
+     *    via the standard permission launcher before calling this)
+     *
+     * When enabled we persist the choice so the service restarts on
+     * the next app launch. When disabled we both stop the service
+     * and clear the persisted flag.
+     */
+    fun setHotwordEnabled(enabled: Boolean) {
+        if (!BuildConfig.AASA_ENABLE_HOTWORD) {
+            _uiState.value = _uiState.value.copy(
+                hotwordSupported = false,
+                hotwordEnabled = false,
+                hotwordError = "Wake word is not enabled in this build."
+            )
+            return
+        }
+        if (enabled) {
+            if (!_uiState.value.hasMicPermission) {
+                _uiState.value = _uiState.value.copy(
+                    hotwordError = "Microphone permission is needed for \"Hey Aasa\"."
+                )
+                return
+            }
+            userPreferences.hotwordEnabled = true
+            runCatching { HotwordService.start(appContext) }
+                .onSuccess {
+                    _uiState.value = _uiState.value.copy(
+                        hotwordEnabled = true,
+                        hotwordError = null
+                    )
+                }
+                .onFailure { error ->
+                    userPreferences.hotwordEnabled = false
+                    _uiState.value = _uiState.value.copy(
+                        hotwordEnabled = false,
+                        hotwordError = "Could not start wake word: " +
+                            error.toReadableMessage()
+                    )
+                }
+        } else {
+            userPreferences.hotwordEnabled = false
+            runCatching { HotwordService.stop(appContext) }
+            _uiState.value = _uiState.value.copy(
+                hotwordEnabled = false,
+                hotwordError = null
+            )
+        }
+    }
+
+    fun clearHotwordError() {
+        _uiState.value = _uiState.value.copy(hotwordError = null)
+    }
+
+    /**
+     * If the build supports hotword AND the elder previously opted in
+     * AND mic permission is granted, re-start the service when the
+     * Home VM is created (covers reboot, process death, app launch).
+     */
+    private fun autoStartHotwordIfOptedIn() {
+        if (!BuildConfig.AASA_ENABLE_HOTWORD) return
+        if (!userPreferences.hotwordEnabled) return
+        // Mic permission isn't known yet at construction time —
+        // [setMicPermissionGranted] re-checks below.
+    }
+
+    /**
+     * Hook called from the Home screen after the mic-permission probe
+     * runs. If the elder is opted in and the permission is granted,
+     * (re-)start the service idempotently.
+     */
+    private fun maybeStartHotwordService() {
+        if (!BuildConfig.AASA_ENABLE_HOTWORD) return
+        if (!userPreferences.hotwordEnabled) return
+        if (!_uiState.value.hasMicPermission) return
+        runCatching { HotwordService.start(appContext) }
+            .onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    hotwordEnabled = true,
+                    hotwordError = null
+                )
+            }
+            .onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    hotwordError = "Could not start wake word: " +
+                        error.toReadableMessage()
+                )
+            }
+    }
+
     /**
      * Default factory: resolves the orchestrator, repositories, voice
      * managers, and the reset-demo action from [AasaApplication].
@@ -549,6 +736,8 @@ class HomeViewModel(
                 speechToTextManager = SpeechToTextManager(application.applicationContext),
                 textToSpeechManager = TextToSpeechManager(application.applicationContext),
                 gemmaRouter = application.gemmaRouter,
+                userPreferences = application.userPreferences,
+                appContext = application.applicationContext,
                 resetDemoDataAction = { application.resetDemoData() }
             ) as T
         }

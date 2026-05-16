@@ -2,6 +2,7 @@ package com.aasa.eldercare.ui.home
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -29,6 +30,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -100,12 +102,40 @@ fun HomeScreen(
         onResult = { granted -> viewModel.onMicPermissionResult(granted) }
     )
 
+    // Phase 12: notifications permission (Android 13+). Required for the
+    // foreground service notification that's shown while "Hey Aasa" is
+    // listening. We request it lazily — only when the elder toggles the
+    // wake word on. Result is fire-and-forget; the service still starts
+    // even if denied (the system will just suppress the visible
+    // notification), but the elder is warned in the UI.
+    val notificationsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { /* no-op: result reflected in next recomposition */ }
+    )
+
+    // Phase 12: wake-word mic-permission launcher. Separate from the
+    // tap-to-talk launcher so we can flip the toggle to ON after the
+    // grant lands.
+    val hotwordPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            viewModel.setMicPermissionGranted(granted)
+            if (granted) {
+                viewModel.setHotwordEnabled(true)
+            }
+        }
+    )
+
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         viewModel.setMicPermissionGranted(granted)
+        // Phase 11: warm "Good morning, <name>..." greeting on launch.
+        // Runs after mic state is set so the post-greeting auto-listen
+        // flag knows whether to fire.
+        viewModel.maybeGreetUser()
     }
 
     // Light haptic when listening starts so the elder gets a tactile
@@ -149,6 +179,47 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             HeaderSection()
+
+            UserNameCard(
+                currentName = uiState.userName,
+                onSave = viewModel::updateUserName,
+                onReplayGreeting = { viewModel.maybeGreetUser(force = true) }
+            )
+
+            if (uiState.hotwordSupported) {
+                HotwordCard(
+                    enabled = uiState.hotwordEnabled,
+                    error = uiState.hotwordError,
+                    onToggle = { wanted ->
+                        if (!wanted) {
+                            viewModel.setHotwordEnabled(false)
+                            return@HotwordCard
+                        }
+                        // Need mic permission first.
+                        val micGranted = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        // On Android 13+, also request POST_NOTIFICATIONS
+                        // so the persistent service notification is visible.
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            val notifGranted = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (!notifGranted) {
+                                notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                        if (micGranted) {
+                            viewModel.setHotwordEnabled(true)
+                        } else {
+                            hotwordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    onDismissError = viewModel::clearHotwordError
+                )
+            }
 
             GemmaStatusCard(
                 selectedMode = uiState.selectedGemmaMode,
@@ -474,6 +545,110 @@ private fun TrustCopyCard() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
+        }
+    }
+}
+
+/**
+ * Phase 12: opt-in "Hey Aasa" wake-word card.
+ *
+ * Only rendered when [HomeUiState.hotwordSupported] is `true` (i.e.
+ * the build was made with `-PaasaEnableHotword=true`). The copy here
+ * is intentionally honest about the trade-offs — battery cost,
+ * persistent notification, hackathon-grade recognition — so the elder
+ * (or a family member helping with setup) can make an informed choice.
+ */
+@Composable
+private fun HotwordCard(
+    enabled: Boolean,
+    error: String?,
+    onToggle: (Boolean) -> Unit,
+    onDismissError: () -> Unit
+) {
+    val container = if (enabled) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val onContainer = if (enabled) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Hey Aasa wake word",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = onContainer
+                    )
+                    Text(
+                        text = if (enabled) {
+                            "Listening for \u201CHey Aasa\u201D."
+                        } else {
+                            "Open Aasa hands-free by saying \u201CHey Aasa\u201D."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = onContainer
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onToggle
+                )
+            }
+            Text(
+                text = "Honest trade-offs:",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = onContainer
+            )
+            Text(
+                text = "\u2022 The mic stays on while Aasa is listening, and a notification will be shown.\n" +
+                    "\u2022 This uses extra battery while active.\n" +
+                    "\u2022 Recognition is hackathon-grade and may miss the phrase or fire on similar words. " +
+                    "If it doesn\u2019t respond, you can always say \u201CHey Google, open Aasa.\u201D",
+                style = MaterialTheme.typography.bodySmall,
+                color = onContainer
+            )
+            error?.let { message ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        OutlinedButton(onClick = onDismissError) {
+                            Text(text = "Dismiss")
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1643,3 +1818,94 @@ private val timestampFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault(
 
 private fun formatTimestamp(epochMs: Long): String =
     runCatching { timestampFormatter.format(Date(epochMs)) }.getOrDefault("")
+
+/**
+ * Phase 11: tiny editable card so the elder (or a family member
+ * helping set up the phone) can set their preferred name. Aasa uses
+ * it in the launch greeting ("Good morning, Naveen.") and nowhere
+ * else — never in tool calls, never sent to the model. Saved to
+ * [com.aasa.eldercare.data.preferences.UserPreferences].
+ *
+ * "Replay greeting" lets demo / QA verify the time-of-day branch
+ * without restarting the app.
+ */
+@Composable
+private fun UserNameCard(
+    currentName: String,
+    onSave: (String) -> Unit,
+    onReplayGreeting: () -> Unit
+) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember(currentName) { mutableStateOf(currentName) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Your name",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Aasa will greet you with this name when you open the app.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (editing) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            onSave(draft)
+                            editing = false
+                        }
+                    ) {
+                        Text(text = "Save")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            draft = currentName
+                            editing = false
+                        }
+                    ) {
+                        Text(text = "Cancel")
+                    }
+                }
+            } else {
+                Text(
+                    text = currentName,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = { editing = true }) {
+                        Text(text = "Change name")
+                    }
+                    OutlinedButton(onClick = onReplayGreeting) {
+                        Text(text = "Replay greeting")
+                    }
+                }
+            }
+        }
+    }
+}

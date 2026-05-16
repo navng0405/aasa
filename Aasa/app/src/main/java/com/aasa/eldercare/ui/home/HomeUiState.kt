@@ -58,7 +58,28 @@ data class HomeUiState(
      * and then calls [HomeViewModel.consumeTransientMessage].
      */
     val transientMessage: String? = null,
-    val transientMessageId: Long = 0L
+    val transientMessageId: Long = 0L,
+
+    /**
+     * Phase 11: personalization — the elder's name shown / spoken
+     * in the launch greeting ("Good morning, Naveen."). Defaults to
+     * "friend" until the elder sets one on Home.
+     */
+    val userName: String = "friend",
+
+    /**
+     * Phase 12: "Hey Aasa" wake-word state.
+     *  - [hotwordSupported] — the build was made with -PaasaEnableHotword=true.
+     *    Hidden entirely from the UI when false.
+     *  - [hotwordEnabled] — the elder has opted in (persisted in
+     *    UserPreferences). When true, the foreground service is running
+     *    and the persistent notification is visible.
+     *  - [hotwordError] — last error from trying to start the service
+     *    (e.g. mic permission missing on the just-installed device).
+     */
+    val hotwordSupported: Boolean = false,
+    val hotwordEnabled: Boolean = false,
+    val hotwordError: String? = null
 ) {
     val showContactActionCard: Boolean
         get() = pendingActionType == ToolActionTypes.CALL_CONTACT &&
