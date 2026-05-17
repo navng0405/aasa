@@ -56,6 +56,7 @@ data class HomeUiState(
     val pendingScamMessageText: String? = null,
     val pendingHeartbeatState: String? = null,
     val pendingSilenceHours: Int? = null,
+    val pendingPairedContactName: String? = null,
 
     /** Phase 8: local Gemma 4 server health. */
     val selectedGemmaMode: GemmaRuntimeMode = GemmaRuntimeMode.ON_DEVICE,
@@ -109,6 +110,10 @@ data class HomeUiState(
 
     val showWellnessCheckCard: Boolean
         get() = pendingActionType == ToolActionTypes.WELLNESS_CHECK &&
+            !pendingPhoneNumber.isNullOrBlank()
+
+    val showNeighborCheckCard: Boolean
+        get() = pendingActionType == ToolActionTypes.NEIGHBOR_CHECK &&
             !pendingPhoneNumber.isNullOrBlank()
 
     val scamRiskCopy: ScamRiskCopy?

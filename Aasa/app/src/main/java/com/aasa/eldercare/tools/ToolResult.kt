@@ -82,6 +82,7 @@ object ToolResultKeys {
     const val WINDOW_END_HOUR = "windowEndHour"
     const val SILENCE_HOURS = "silenceHours"
     const val DEEP_LINK = "deepLink"
+    const val PAIRED_CONTACT_NAME = "pairedContactName"
 
     // Document reader
     const val DOCUMENT_TEXT = "documentText"
@@ -106,6 +107,7 @@ object ToolActionTypes {
     const val MOBILITY_CHECK = "MOBILITY_CHECK"
     const val HEALTH_BRIEFING = "HEALTH_BRIEFING"
     const val WELLNESS_CHECK = "WELLNESS_CHECK"
+    const val NEIGHBOR_CHECK = "NEIGHBOR_CHECK"
     const val DOCUMENT_READING = "DOCUMENT_READING"
 }
 

@@ -20,5 +20,12 @@ data class TrustedContactEntity(
     val relationship: String,
     val phoneNumber: String,
     val isPrimary: Boolean = false,
+    val relationshipType: String = TrustedRelationshipTypes.CARE_RECIPIENT,
+    val pairedContactId: Long? = null,
     @ColumnInfo(name = "nameLower") val nameLower: String = name.lowercase()
 )
+
+object TrustedRelationshipTypes {
+    const val CARE_RECIPIENT = "CARE_RECIPIENT"
+    const val CARE_PROVIDER = "CARE_PROVIDER"
+}

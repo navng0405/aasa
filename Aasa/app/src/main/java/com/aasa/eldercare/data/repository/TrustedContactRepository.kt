@@ -2,6 +2,7 @@ package com.aasa.eldercare.data.repository
 
 import com.aasa.eldercare.data.dao.TrustedContactDao
 import com.aasa.eldercare.data.entity.TrustedContactEntity
+import com.aasa.eldercare.data.entity.TrustedRelationshipTypes
 import kotlinx.coroutines.flow.Flow
 
 class TrustedContactRepository(
@@ -14,6 +15,12 @@ class TrustedContactRepository(
         dao.findByName(name.trim().lowercase())
 
     suspend fun findPrimaryContact(): TrustedContactEntity? = dao.findPrimaryContact()
+
+    suspend fun findPairedCareProviderFor(contactId: Long): TrustedContactEntity? =
+        dao.findPairedContact(
+            pairedContactId = contactId,
+            relationshipType = TrustedRelationshipTypes.CARE_PROVIDER
+        )
 
     suspend fun upsert(contact: TrustedContactEntity): Long = dao.insertContact(contact)
 

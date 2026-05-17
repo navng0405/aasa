@@ -21,6 +21,7 @@ import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
 import com.aasa.eldercare.tools.ToolResultKeys
+import com.aasa.eldercare.tools.NeighborCheckTool
 import com.aasa.eldercare.tools.WellnessCheckTool
 import com.aasa.eldercare.voice.HotwordService
 import com.aasa.eldercare.voice.SpeechEvent
@@ -161,7 +162,8 @@ class HomeViewModel(
                 pendingSafeAction = null,
                 pendingScamMessageText = null,
                 pendingHeartbeatState = null,
-                pendingSilenceHours = null
+                pendingSilenceHours = null,
+                pendingPairedContactName = null
             )
             runCatching { orchestrator.handleUserMessage(message) }
                 .onSuccess { result ->
@@ -187,6 +189,7 @@ class HomeViewModel(
                         pendingScamMessageText = pending.scamMessageText,
                         pendingHeartbeatState = pending.heartbeatState,
                         pendingSilenceHours = pending.silenceHours,
+                        pendingPairedContactName = pending.pairedContactName,
                         gemmaConnection = GemmaConnectionState.CONNECTED,
                         selectedGemmaMode = if (gemmaRouter.usingBridge) {
                             GemmaRuntimeMode.MAC_BRIDGE
@@ -222,6 +225,7 @@ class HomeViewModel(
                         pendingScamMessageText = null,
                         pendingHeartbeatState = null,
                         pendingSilenceHours = null,
+                        pendingPairedContactName = null,
                         gemmaConnection = GemmaConnectionState.DISCONNECTED,
                         gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
                         gemmaStatusDetail = error.toReadableMessage()
@@ -268,6 +272,16 @@ class HomeViewModel(
                 heartbeatState = (data[ToolResultKeys.HEARTBEAT_STATE] as? String)?.takeIf { it.isNotBlank() },
                 silenceHours = (data[ToolResultKeys.SILENCE_HOURS] as? Number)?.toInt()
             )
+            ToolActionTypes.NEIGHBOR_CHECK -> PendingAction(
+                actionType = actionType,
+                contactName = (data[ToolResultKeys.CONTACT_NAME] as? String)?.takeIf { it.isNotBlank() },
+                pairedContactName = (data[ToolResultKeys.PAIRED_CONTACT_NAME] as? String)
+                    ?.takeIf { it.isNotBlank() },
+                phoneNumber = (data[ToolResultKeys.PHONE_NUMBER] as? String)?.takeIf { it.isNotBlank() },
+                alertMessage = (data[ToolResultKeys.ALERT_MESSAGE] as? String)?.takeIf { it.isNotBlank() },
+                scamMessageText = (data[ToolResultKeys.MESSAGE_TEXT] as? String)?.takeIf { it.isNotBlank() },
+                silenceHours = (data[ToolResultKeys.SILENCE_HOURS] as? Number)?.toInt()
+            )
             else -> PendingAction.NONE
         }
     }
@@ -295,7 +309,8 @@ class HomeViewModel(
             pendingSafeAction = null,
             pendingScamMessageText = null,
             pendingHeartbeatState = null,
-            pendingSilenceHours = null
+            pendingSilenceHours = null,
+            pendingPairedContactName = null
         )
     }
 
@@ -310,7 +325,8 @@ class HomeViewModel(
         val safeAction: String? = null,
         val scamMessageText: String? = null,
         val heartbeatState: String? = null,
-        val silenceHours: Int? = null
+        val silenceHours: Int? = null,
+        val pairedContactName: String? = null
     ) {
         companion object {
             val NONE = PendingAction()
@@ -377,6 +393,7 @@ class HomeViewModel(
                         pendingScamMessageText = null,
                         pendingHeartbeatState = null,
                         pendingSilenceHours = null,
+                        pendingPairedContactName = null,
                         recognizedSpeech = null,
                         errorMessage = null,
                         voiceError = null
@@ -793,12 +810,32 @@ class HomeViewModel(
         val shouldEscalate = silenceHours >= WELLNESS_ESCALATION_HOURS &&
             (now - userPreferences.lastWellnessEscalationAtMs) >= WELLNESS_ESCALATION_COOLDOWN_MS
         if (shouldEscalate) {
+            triggerEscalationCheck(
+                silenceHours = silenceHours,
+                morningWindow = morningWindow
+            )
+            userPreferences.lastWellnessEscalationAtMs = now
+        }
+    }
+
+    private suspend fun triggerEscalationCheck(
+        silenceHours: Int,
+        morningWindow: PresencePingRepository.MorningWindow
+    ) {
+        val hasNeighborHelper = trustedContactRepository.findPrimaryContact()
+            ?.let { trustedContactRepository.findPairedCareProviderFor(it.id) != null }
+            ?: false
+        if (hasNeighborHelper) {
+            triggerNeighborCheck(
+                silenceHours = silenceHours,
+                morningWindow = morningWindow
+            )
+        } else {
             triggerWellnessCheck(
                 state = WellnessCheckTool.STATE_ESCALATED,
                 silenceHours = silenceHours,
                 morningWindow = morningWindow
             )
-            userPreferences.lastWellnessEscalationAtMs = now
         }
     }
 
@@ -836,7 +873,47 @@ class HomeViewModel(
             pendingAlertMessage = pending.alertMessage,
             pendingScamMessageText = pending.scamMessageText,
             pendingHeartbeatState = pending.heartbeatState,
-            pendingSilenceHours = pending.silenceHours
+            pendingSilenceHours = pending.silenceHours,
+            pendingPairedContactName = pending.pairedContactName
+        )
+    }
+
+    private suspend fun triggerNeighborCheck(
+        silenceHours: Int,
+        morningWindow: PresencePingRepository.MorningWindow
+    ) {
+        val syntheticMessage = "Daily heartbeat timeout: neighbor check escalation."
+        val result = orchestrator.handleUserMessage(syntheticMessage)
+        val helperName = (result.toolResult.data[ToolResultKeys.CONTACT_NAME] as? String).orEmpty()
+        val recipientName = (result.toolResult.data[ToolResultKeys.PAIRED_CONTACT_NAME] as? String).orEmpty()
+        val neighborSms = buildString {
+            append("Hi ")
+            append(if (helperName.isBlank()) "neighbor" else helperName)
+            append(", Aasa noticed ")
+            append(if (recipientName.isBlank()) "your paired elder" else recipientName)
+            append(" has been quiet for ")
+            append(silenceHours.coerceAtLeast(1))
+            append(" hours. If it feels safe, please do a quick doorstep check. ")
+            append(WELLNESS_DEEP_LINK)
+        }
+        val patchedResult = result.toolResult.copy(
+            data = result.toolResult.data + mapOf(
+                NeighborCheckTool.ARG_SILENCE_HOURS to silenceHours,
+                WellnessCheckTool.ARG_WINDOW_START_HOUR to morningWindow.startHour24,
+                WellnessCheckTool.ARG_WINDOW_END_HOUR to morningWindow.endHour24,
+                NeighborCheckTool.ARG_DEEP_LINK to WELLNESS_DEEP_LINK,
+                ToolResultKeys.MESSAGE_TEXT to neighborSms
+            )
+        )
+        val pending = parsePendingAction(patchedResult)
+        _uiState.value = _uiState.value.copy(
+            pendingActionType = pending.actionType,
+            pendingContactName = pending.contactName,
+            pendingPhoneNumber = pending.phoneNumber,
+            pendingAlertMessage = pending.alertMessage,
+            pendingScamMessageText = pending.scamMessageText,
+            pendingSilenceHours = pending.silenceHours,
+            pendingPairedContactName = pending.pairedContactName
         )
     }
 

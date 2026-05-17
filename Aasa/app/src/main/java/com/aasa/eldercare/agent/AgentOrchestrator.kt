@@ -146,6 +146,12 @@ class AgentOrchestrator(
             )
 
             // --- 1d. Daily heartbeat / wellness-check override ----------
+            IntentKeywords.isNeighborCheckRequest(userMessage) -> action.copy(
+                intent = INTENT_NEIGHBOR_CHECK,
+                tool = ToolNames.NEIGHBOR_CHECK,
+                riskLevel = action.riskLevel.ifBlank { RISK_MEDIUM },
+                arguments = enrichedArgs
+            )
             IntentKeywords.isWellnessCheckRequest(userMessage) -> action.copy(
                 intent = INTENT_WELLNESS_CHECK,
                 tool = ToolNames.WELLNESS_CHECK,
@@ -217,6 +223,7 @@ class AgentOrchestrator(
         private const val INTENT_MOBILITY_CHECK = "MOBILITY_CHECK"
         private const val INTENT_HEALTH_BRIEFING = "HEALTH_BRIEFING"
         private const val INTENT_WELLNESS_CHECK = "WELLNESS_CHECK"
+        private const val INTENT_NEIGHBOR_CHECK = "NEIGHBOR_CHECK"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"

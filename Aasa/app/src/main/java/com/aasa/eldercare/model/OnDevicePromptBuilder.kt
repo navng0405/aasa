@@ -28,9 +28,9 @@ Return ONLY a single JSON object. No prose. No markdown. No code fences.
 
 Schema:
 {
-  "intent": "CHAT | SAVE_MEMORY | LOG_MEDICATION | CHECK_MEDICATION | CREATE_REMINDER | CALL_CONTACT | SAFETY_CHECK | ALERT_TRUSTED_CONTACT | ANALYZE_SCAM | FALL_TRIAGE | MOBILITY_CHECK",
+  "intent": "CHAT | SAVE_MEMORY | LOG_MEDICATION | CHECK_MEDICATION | CREATE_REMINDER | CALL_CONTACT | SAFETY_CHECK | ALERT_TRUSTED_CONTACT | ANALYZE_SCAM | FALL_TRIAGE | MOBILITY_CHECK | WELLNESS_CHECK | NEIGHBOR_CHECK",
   "riskLevel": "LOW | MEDIUM | HIGH",
-  "tool": "ChatTool | MemoryTool | MedicationTool | ReminderTool | TrustedContactTool | SafetyTool | ScamShieldTool | FallTriageTool | MobilityShieldTool",
+  "tool": "ChatTool | MemoryTool | MedicationTool | ReminderTool | TrustedContactTool | SafetyTool | ScamShieldTool | FallTriageTool | MobilityShieldTool | WellnessCheckTool | NeighborCheckTool",
   "arguments": {},
   "assistantResponse": "short, warm caregiver reply"
 }

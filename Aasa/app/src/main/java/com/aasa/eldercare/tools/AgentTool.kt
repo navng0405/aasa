@@ -29,5 +29,6 @@ object ToolNames {
     const val MOBILITY_SHIELD = "MobilityShieldTool"
     const val HEALTH_BRIEFING = "HealthBriefingTool"
     const val WELLNESS_CHECK = "WellnessCheckTool"
+    const val NEIGHBOR_CHECK = "NeighborCheckTool"
     const val DOCUMENT_READER = "DocumentReaderTool"
 }

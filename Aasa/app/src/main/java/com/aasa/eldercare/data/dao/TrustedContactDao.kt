@@ -21,4 +21,14 @@ interface TrustedContactDao {
 
     @Query("SELECT * FROM trusted_contacts WHERE isPrimary = 1 LIMIT 1")
     suspend fun findPrimaryContact(): TrustedContactEntity?
+
+    @Query(
+        "SELECT * FROM trusted_contacts " +
+            "WHERE relationshipType = :relationshipType AND pairedContactId = :pairedContactId " +
+            "ORDER BY isPrimary DESC, name ASC LIMIT 1"
+    )
+    suspend fun findPairedContact(
+        pairedContactId: Long,
+        relationshipType: String
+    ): TrustedContactEntity?
 }

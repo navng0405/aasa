@@ -1192,6 +1192,24 @@ private fun PendingActionSection(
                 onDismiss = onDismiss
             )
         }
+        uiState.showNeighborCheckCard -> {
+            NeighborCheckActionCard(
+                helperName = uiState.pendingContactName,
+                recipientName = uiState.pendingPairedContactName,
+                prompt = uiState.pendingAlertMessage,
+                smsBody = uiState.pendingScamMessageText,
+                silenceHours = uiState.pendingSilenceHours,
+                onOpenSms = {
+                    val number = uiState.pendingPhoneNumber
+                    val body = uiState.pendingScamMessageText
+                    if (!number.isNullOrBlank() && !body.isNullOrBlank()) {
+                        onOpenSms(number, body)
+                    }
+                    onDismiss()
+                },
+                onDismiss = onDismiss
+            )
+        }
         uiState.showScamAnalysisCard -> {
             ScamAnalysisCard(
                 riskCopy = uiState.scamRiskCopy,
@@ -1297,6 +1315,64 @@ private fun WellnessCheckActionCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(text = "Prepare SMS to ${contactName ?: "Priya"}")
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Dismiss")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NeighborCheckActionCard(
+    helperName: String?,
+    recipientName: String?,
+    prompt: String?,
+    smsBody: String?,
+    silenceHours: Int?,
+    onOpenSms: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = prompt ?: "${recipientName ?: "Your neighbor"} hasn't checked in today. Want to knock on the door?",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                text = "No activity for ${silenceHours ?: 0} hours. Aasa prepared a respectful neighbor check-in message.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                text = "Aasa never sends messages automatically. You choose.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onOpenSms,
+                    enabled = !smsBody.isNullOrBlank(),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Prepare SMS to ${helperName ?: "helper"}")
                 }
                 OutlinedButton(
                     onClick = onDismiss,
@@ -1596,6 +1672,7 @@ private fun humanizeTool(rawTool: String?): String {
         "FALLTRIAGE", "FALLTRIAGETOOL" -> "FallTriageTool"
         "MOBILITYSHIELD", "MOBILITYSHIELDTOOL" -> "MobilityShieldTool"
         "WELLNESSCHECK", "WELLNESSCHECKTOOL" -> "WellnessCheckTool"
+        "NEIGHBORCHECK", "NEIGHBORCHECKTOOL" -> "NeighborCheckTool"
         "DOCUMENTREADER", "DOCUMENTREADERTOOL" -> "DocumentReaderTool"
         else -> cleaned
     }

@@ -235,6 +235,17 @@ object IntentKeywords {
         return WELLNESS_CHECK_TRIGGERS.any { lower.contains(it) }
     }
 
+    private val NEIGHBOR_CHECK_TRIGGERS: List<String> = listOf(
+        "neighbor check escalation",
+        "neighbour check escalation",
+        "community helper check"
+    )
+
+    fun isNeighborCheckRequest(text: String): Boolean {
+        val lower = text.lowercase()
+        return NEIGHBOR_CHECK_TRIGGERS.any { lower.contains(it) }
+    }
+
     /**
      * Best-effort coarse type for a memory derived from the raw user
      * message – used by [com.aasa.eldercare.tools.MemoryTool] when
