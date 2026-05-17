@@ -1,6 +1,7 @@
 package com.aasa.eldercare.ui.home
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -11,6 +12,9 @@ import com.aasa.eldercare.agent.GreetingBuilder
 import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.preferences.UserPreferences
 import com.aasa.eldercare.data.repository.ConversationRepository
+import com.aasa.eldercare.data.repository.MedicationRepository
+import com.aasa.eldercare.data.repository.TrustedContactRepository
+import com.aasa.eldercare.medicine.MedicineLensAnalyzer
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
@@ -49,6 +53,8 @@ import kotlinx.coroutines.launch
 class HomeViewModel(
     private val orchestrator: AgentOrchestrator,
     private val conversationRepository: ConversationRepository,
+    private val medicationRepository: MedicationRepository,
+    private val trustedContactRepository: TrustedContactRepository,
     private val speechToTextManager: SpeechToTextManager,
     private val textToSpeechManager: TextToSpeechManager,
     private val gemmaRouter: GemmaRouter,
@@ -75,6 +81,9 @@ class HomeViewModel(
      */
     private var greetingSpoken: Boolean = false
     private var autoListenAfterGreeting: Boolean = false
+    private val medicineLensAnalyzer: MedicineLensAnalyzer by lazy {
+        MedicineLensAnalyzer(appContext, medicationRepository)
+    }
 
     /** Live feed of recent conversation rows; survives process death. */
     val recentConversations: StateFlow<List<ConversationEntity>> =
@@ -405,6 +414,64 @@ class HomeViewModel(
         _uiState.value = _uiState.value.copy(voiceError = null)
     }
 
+    fun analyzeMedicinePhoto(uri: Uri) {
+        if (_uiState.value.isMedicineLensAnalyzing) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isMedicineLensAnalyzing = true,
+                medicineLensError = null,
+                medicineLensResult = null,
+                medicineLensCareContactName = null,
+                medicineLensCareContactPhone = null,
+                medicineLensCareBrief = null
+            )
+            runCatching { medicineLensAnalyzer.analyze(uri) }
+                .onSuccess { result ->
+                    val contact = runCatching { trustedContactRepository.findPrimaryContact() }
+                        .getOrNull()
+                    val brief = contact?.let { buildMedicineCareBrief(result.summary) }
+                    _uiState.value = _uiState.value.copy(
+                        isMedicineLensAnalyzing = false,
+                        medicineLensResult = result,
+                        medicineLensError = null,
+                        medicineLensCareContactName = contact?.name,
+                        medicineLensCareContactPhone = contact?.phoneNumber,
+                        medicineLensCareBrief = brief
+                    )
+                    if (result.summary.isNotBlank()) {
+                        textToSpeechManager.speak(result.summary)
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(
+                        isMedicineLensAnalyzing = false,
+                        medicineLensResult = null,
+                        medicineLensError = "I could not read that photo clearly: " +
+                            error.toReadableMessage()
+                    )
+                }
+        }
+    }
+
+    fun onMedicinePhotoNotCaptured() {
+        _uiState.value = _uiState.value.copy(
+            medicineLensError = "No photo was captured. Please try again with the medicine label in good light."
+        )
+    }
+
+    fun clearMedicineLens() {
+        _uiState.value = _uiState.value.copy(
+            medicineLensResult = null,
+            medicineLensError = null,
+            medicineLensCareContactName = null,
+            medicineLensCareContactPhone = null,
+            medicineLensCareBrief = null
+        )
+    }
+
+    private fun buildMedicineCareBrief(summary: String): String =
+        "Hi, Aasa helped me check a medicine label. $summary"
+
     /**
      * Public hook for callers (Compose-side launchers, tests) that
      * already have a recognized transcript. Mirrors the path the
@@ -413,12 +480,33 @@ class HomeViewModel(
     fun onSpeechRecognized(text: String) {
         val cleaned = text.trim()
         if (cleaned.isBlank()) return
+        if (isWakePhrase(cleaned)) {
+            _uiState.value = _uiState.value.copy(
+                recognizedSpeech = cleaned,
+                inputText = "",
+                voiceError = null,
+                agentAction = null,
+                toolExecutionSuccess = null,
+                toolResultMessage = null,
+                toolResultData = emptyMap(),
+                persistedToolResultMessage = null
+            )
+            maybeGreetUser(force = true, fromWakeWord = true)
+            return
+        }
         _uiState.value = _uiState.value.copy(
             recognizedSpeech = cleaned,
             inputText = cleaned,
             voiceError = null
         )
         sendMessage(cleaned)
+    }
+
+    private fun isWakePhrase(text: String): Boolean {
+        val normalized = text.lowercase()
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+        return normalized in WAKE_PHRASES
     }
 
     private fun observeSpeechEvents() {
@@ -587,7 +675,7 @@ class HomeViewModel(
      * "auto-listen after greeting" flag so the elder can answer the
      * "How are you feeling?" question hands-free.
      */
-    fun maybeGreetUser(force: Boolean = false) {
+    fun maybeGreetUser(force: Boolean = false, fromWakeWord: Boolean = false) {
         if (greetingSpoken && !force) return
         val now = System.currentTimeMillis()
         if (!force && !userPreferences.shouldGreet(now)) {
@@ -597,7 +685,11 @@ class HomeViewModel(
             return
         }
         val name = userPreferences.userName
-        val greeting = GreetingBuilder.build(userName = name)
+        val greeting = if (fromWakeWord) {
+            GreetingBuilder.buildWakeGreeting(userName = name)
+        } else {
+            GreetingBuilder.build(userName = name)
+        }
         greetingSpoken = true
         autoListenAfterGreeting = _uiState.value.hasMicPermission
         userPreferences.markGreeted(now)
@@ -719,6 +811,8 @@ class HomeViewModel(
             return HomeViewModel(
                 orchestrator = application.agentOrchestrator,
                 conversationRepository = application.conversationRepository,
+                medicationRepository = application.medicationRepository,
+                trustedContactRepository = application.trustedContactRepository,
                 speechToTextManager = SpeechToTextManager(application.applicationContext),
                 textToSpeechManager = TextToSpeechManager(application.applicationContext),
                 gemmaRouter = application.gemmaRouter,
@@ -731,5 +825,11 @@ class HomeViewModel(
 
     private companion object {
         const val HEALTH_PROBE_INTERVAL_MS = 15_000L
+        val WAKE_PHRASES = setOf(
+            "hey aasa",
+            "hey asa",
+            "ok aasa",
+            "okay aasa"
+        )
     }
 }

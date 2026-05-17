@@ -82,6 +82,9 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
 
+    // Medicine Lens: on-device OCR for prescription labels / tablet strips.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
     implementation("androidx.room:room-ktx:2.8.4")
     implementation("androidx.room:room-runtime:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")

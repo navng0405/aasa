@@ -1,7 +1,10 @@
 package com.aasa.eldercare.ui.home
 
 import android.Manifest
+import android.content.Context
+import android.app.Activity
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,12 +55,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentAction
 import com.aasa.eldercare.data.entity.ConversationEntity
+import com.aasa.eldercare.medicine.MedicineLensConfidence
+import com.aasa.eldercare.medicine.MedicineLensResult
 import com.aasa.eldercare.ui.IntentActionLauncher
+import com.aasa.eldercare.voice.HotwordService
 import com.google.gson.GsonBuilder
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -96,6 +104,7 @@ fun HomeScreen(
     val haptics = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeveloperDetails by remember { mutableStateOf(false) }
+    var medicinePhotoUri by remember { mutableStateOf<Uri?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -126,6 +135,18 @@ fun HomeScreen(
         }
     )
 
+    val medicinePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { captured ->
+            val uri = medicinePhotoUri
+            if (captured && uri != null) {
+                viewModel.analyzeMedicinePhoto(uri)
+            } else {
+                viewModel.onMedicinePhotoNotCaptured()
+            }
+        }
+    )
+
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(
             context,
@@ -135,7 +156,10 @@ fun HomeScreen(
         // Phase 11: warm "Good morning, <name>..." greeting on launch.
         // Runs after mic state is set so the post-greeting auto-listen
         // flag knows whether to fire.
-        viewModel.maybeGreetUser()
+        val fromWakeWord = (context as? Activity)
+            ?.intent
+            ?.getBooleanExtra(HotwordService.EXTRA_FROM_WAKE_WORD, false) == true
+        viewModel.maybeGreetUser(fromWakeWord = fromWakeWord)
     }
 
     // Light haptic when listening starts so the elder gets a tactile
@@ -202,6 +226,24 @@ fun HomeScreen(
                 isLoading = uiState.isLoading,
                 onChange = viewModel::onInputChange,
                 onSend = viewModel::sendCurrentMessage
+            )
+
+            MedicineLensSection(
+                isAnalyzing = uiState.isMedicineLensAnalyzing,
+                result = uiState.medicineLensResult,
+                error = uiState.medicineLensError,
+                careContactName = uiState.medicineLensCareContactName,
+                careContactPhone = uiState.medicineLensCareContactPhone,
+                careBrief = uiState.medicineLensCareBrief,
+                onTakePhoto = {
+                    val uri = createMedicineLensPhotoUri(context)
+                    medicinePhotoUri = uri
+                    medicinePhotoLauncher.launch(uri)
+                },
+                onTellCareContact = { number, body ->
+                    IntentActionLauncher.openSms(context, number, body)
+                },
+                onClear = viewModel::clearMedicineLens
             )
 
             if (uiState.isLoading) {
@@ -344,6 +386,17 @@ fun HomeScreen(
 private fun aasaHomeViewModel(): HomeViewModel {
     val application = LocalContext.current.applicationContext as AasaApplication
     return viewModel(factory = HomeViewModel.Factory(application))
+}
+
+private fun createMedicineLensPhotoUri(context: Context): Uri {
+    val dir = File(context.cacheDir, "medicine_lens").apply { mkdirs() }
+    val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+    val imageFile = File(dir, "medicine_$stamp.jpg")
+    return FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        imageFile
+    )
 }
 
 // ---------------------------------------------------------------------
@@ -705,6 +758,245 @@ private fun ManualInputSection(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MedicineLensSection(
+    isAnalyzing: Boolean,
+    result: MedicineLensResult?,
+    error: String?,
+    careContactName: String?,
+    careContactPhone: String?,
+    careBrief: String?,
+    onTakePhoto: () -> Unit,
+    onTellCareContact: (String, String) -> Unit,
+    onClear: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(text = "\uD83D\uDCF7", fontSize = 42.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Medicine Lens",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "Photograph a tablet strip or prescription label.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            Button(
+                onClick = onTakePhoto,
+                enabled = !isAnalyzing,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+            ) {
+                Text(text = "\uD83D\uDCF8", fontSize = 26.sp)
+                Text(text = "  ")
+                Text(
+                    text = if (isAnalyzing) "Reading photo..." else "Take Photo",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            if (isAnalyzing) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Text(
+                        text = "Reading the label on-device...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            result?.let { lens ->
+                MedicineLensResultCard(
+                    result = lens,
+                    careContactName = careContactName,
+                    careContactPhone = careContactPhone,
+                    careBrief = careBrief,
+                    onTellCareContact = onTellCareContact,
+                    onClear = onClear
+                )
+            }
+
+            error?.let { message ->
+                MedicineLensErrorCard(message = message, onDismiss = onClear)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MedicineLensResultCard(
+    result: MedicineLensResult,
+    careContactName: String?,
+    careContactPhone: String?,
+    careBrief: String?,
+    onTellCareContact: (String, String) -> Unit,
+    onClear: () -> Unit
+) {
+    val confidenceLabel = when (result.confidence) {
+        MedicineLensConfidence.MEDIUM -> "Possible match"
+        MedicineLensConfidence.LOW -> "Needs confirmation"
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = confidenceLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            result.recognizedName?.let { name ->
+                Text(
+                    text = result.strength?.let { "$name · $it" } ?: name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = result.summary,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = result.safetyNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            SafetyReceiptCard(items = result.safetyReceipt)
+            if (!careContactPhone.isNullOrBlank() && !careBrief.isNullOrBlank()) {
+                Button(
+                    onClick = { onTellCareContact(careContactPhone, careBrief) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                ) {
+                    Text(text = "\uD83D\uDCAC", fontSize = 22.sp)
+                    Text(text = "  ")
+                    Text(
+                        text = "Tell ${careContactName ?: "my trusted contact"}",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Text(
+                    text = "Aasa will prepare a message. You choose whether to send it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(
+                onClick = onClear,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "Clear")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SafetyReceiptCard(items: List<com.aasa.eldercare.medicine.SafetyReceiptItem>) {
+    if (items.isEmpty()) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(text = "\u2705", fontSize = 22.sp)
+                Text(
+                    text = "Safety receipt",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+            items.forEach { item ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = item.value,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MedicineLensErrorCard(message: String, onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            OutlinedButton(onClick = onDismiss) {
+                Text(text = "Dismiss")
             }
         }
     }

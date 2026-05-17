@@ -40,6 +40,16 @@ object GreetingBuilder {
         return "$opener, $name. $check"
     }
 
+    fun buildWakeGreeting(
+        userName: String,
+        hourOfDay: Int = currentHour(),
+        random: Random = Random.Default
+    ): String {
+        val name = userName.trim().ifBlank { "friend" }
+        val check = pick(WAKE_CHECK_INS, random)
+        return "Hello, $name. $check"
+    }
+
     fun classifyHour(hour: Int): TimeOfDay = when (hour) {
         in 5..11 -> TimeOfDay.MORNING
         in 12..16 -> TimeOfDay.AFTERNOON
@@ -73,7 +83,6 @@ object GreetingBuilder {
 
     private val AFTERNOON_OPENERS = listOf(
         "Good afternoon",
-        "Hello there",
         "Hi"
     )
 
@@ -85,7 +94,6 @@ object GreetingBuilder {
 
     private val NIGHT_OPENERS = listOf(
         "Hello",
-        "Hi there",
         "It's good to hear from you"
     )
 
@@ -103,5 +111,12 @@ object GreetingBuilder {
         "Take your time, I'm listening. How are you today?",
         "How has your day been so far?",
         "How are things with you today?"
+    )
+
+    private val WAKE_CHECK_INS = listOf(
+        "I'm here with you. How are you feeling today?",
+        "I'm listening. How can I help you?",
+        "Take your time, I'm right here. What would you like to do?",
+        "It's good to hear you. How are you today?"
     )
 }

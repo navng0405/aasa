@@ -1,6 +1,7 @@
 package com.aasa.eldercare.ui.home
 
 import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.medicine.MedicineLensResult
 import com.aasa.eldercare.tools.ToolActionTypes
 
 /**
@@ -32,6 +33,14 @@ data class HomeUiState(
     val voiceError: String? = null,
     val ttsStatus: String? = null,
     val hasMicPermission: Boolean = false,
+
+    /** Medicine Lens: camera OCR result for prescription labels / tablet strips. */
+    val isMedicineLensAnalyzing: Boolean = false,
+    val medicineLensResult: MedicineLensResult? = null,
+    val medicineLensError: String? = null,
+    val medicineLensCareContactName: String? = null,
+    val medicineLensCareContactPhone: String? = null,
+    val medicineLensCareBrief: String? = null,
 
     /** Phase 7 deferred-confirmation action payload. */
     val pendingActionType: String? = null,
