@@ -1,652 +1,478 @@
-# Aasa — Gemma 4 Safety Agent for Independent Elders
+# Aasa Project Overview and Demo Script
 
-> **For a fresh AI assistant**: read this file end-to-end before answering any question about the codebase. It is the single source of truth for *what Aasa is, why it exists, how it is structured, and which decisions are deliberate vs. hackathon-grade*. Don't reinvent design choices that this file already records — call them out instead.
+> Read this file before answering questions about the Aasa codebase. It records what is implemented, what is intentionally hackathon-grade, and how to demo the product without overclaiming.
 
----
+## 1. One-Line Pitch
 
-## 1. One-line description
+Aasa is a voice-first, local-first safety companion for elders living independently. It runs Gemma 4 on the phone when available, uses deterministic safety overrides before tool dispatch, stores personal context in on-device Room, and always asks the elder to confirm before launching a call, SMS, or safety action.
 
-Aasa is an on-device, voice-first, Gemma-4-powered safety companion for elders living alone. It listens (text or voice), classifies the request through a small local LLM, runs a deterministic "safety override" on the user's words *before* dispatching, executes the matching local tool against an on-device Room database, and surfaces a *deferred-confirmation* action card the elder must explicitly tap before anything real happens (dialer, SMS, alert).
+## 2. Demo Story
 
-## 2. Why this app exists
+**Opening line:** "Aasa is built for the moment when an aging parent is alone at home, needs help, but should not have to navigate a complicated app. It listens, explains gently, checks local records, and prepares safe next steps without taking control away."
 
-The vision is "a calm, privacy-respecting agent that helps an aging parent stay independent without a caregiver in the room."
+**Demo arc:**
 
-Specific problems the app addresses, in priority order:
+1. **Launch and greeting**  
+   Open Aasa. It greets the elder by name with time-aware TTS, then can automatically listen after the greeting if mic permission is granted. Show the name card and replay greeting if needed.
 
-1. **Fall detection + triage** — a brief accelerometer-based fall heuristic, then a *spoken* triage check ("Are you okay?") whose response is classified into FALSE_ALARM / NON_EMERGENCY_INJURY / URGENT_RISK / NO_RESPONSE, with the elder still in control of whether to dial.
-2. **Medication discipline** — log "I took my BP tablet", check "Did I take my medicine today?", and answer truthfully from a real Room database — not from the LLM's hallucinated memory.
-3. **Memory** — capture biographical facts ("My granddaughter Ananya's birthday is May 12.") so the agent can recall them later.
-4. **Scam & Fraud Shield** — paste a suspicious SMS / WhatsApp / voicemail-transcript and get a gentle, non-condescending explanation of warning signals (gift-card requests, OTP asks, urgent-money asks) plus a safe next step.
-5. **Trusted Circle** — one primary contact (default seeded as "Priya"). Aasa offers to alert this person on MEDIUM-risk situations and emergency dialer + alert on HIGH-risk.
-6. **Mobility Shield** — a 10-second accelerometer-based walk check that produces a friendly "mobility confidence" score, *explicitly not a medical diagnosis*.
-7. **Morning Briefing (wearable-ready)** — read-only Health Connect snapshot (sleep, resting heart rate, steps) for the last 24 hours, turned into a gentle, elder-friendly summary. Works with any wearable that writes to Health Connect (Fitbit Air, Pixel Watch, Galaxy Watch). When no wearable is connected, a mandatory **"Demo data — no wearable connected"** pill is surfaced so we never fake real wearable data.
-8. **Local-first privacy** — all persistence is on-device Room. The LLM runs **on the phone itself** via LiteRT-LM (Gemma 4 E2B int4, `gemma-4-E2B-it.litertlm`, ~2.4 GB). The Mac-side Ollama bridge is retained only as a developer fallback. No cloud LLM is ever called.
+2. **Medication memory grounded in Room**  
+   Tap the `Medication` demo chip: `"I took my BP tablet."`  
+   Then ask: `"Did I take my medicine today?"`  
+   Aasa answers from the medication log, not model memory.
 
-## 3. Hard rules / non-negotiables
+3. **Family memory**  
+   Tap the `Memory` demo chip: `"My granddaughter Ananya's birthday is May 12."`  
+   Open the Memory screen to show the saved fact.
 
-These are baked into the code and prompt; do **not** suggest changes that violate them without checking with the user first.
+4. **Medium-risk safety with deferred confirmation**  
+   Tap `Safety`: `"I feel weak and missed my medicine."`  
+   Aasa prepares an alert to Priya, but it does not send automatically. Point at the action card: the elder chooses.
 
-- **No medical diagnosis.** Tools and prompts are explicit about not naming conditions (Parkinson's, dementia, stroke, etc.). They describe behavior ("your walk looked a little less steady than usual"), not pathology.
-- **No auto-dial / no auto-SMS.** Phone actions go through `Intent.ACTION_DIAL` (never `ACTION_CALL`) so the `CALL_PHONE` permission is *not* requested. SMS uses `ACTION_SENDTO` with `smsto:` so the elder still has to press send.
-- **No background sensing.** Both `FallDetectionManager` and `MobilitySensorManager` only run while their screen is foregrounded; the ViewModel calls `stop()` in `onCleared`. There is no `WorkManager` job, no foreground service, no boot-time start.
-- **No cloud LLM.** Default inference path is **on-device only** (LiteRT-LM + `gemma-4-E2B-it.litertlm`). The optional Mac bridge at `http://127.0.0.1:8000/agent/message` is a **dev fallback only** and must be explicitly enabled at build time.
-- **Deferred confirmation, always.** Tools never act — they return a `ToolResult` whose `data["actionType"]` tells the UI to render an action card with explicit elder-controlled buttons.
-- **Deterministic safety wins.** If the on-device keyword scanner says "this is HIGH risk" and Gemma says LOW, the device **escalates** to HIGH. We never downgrade.
+5. **Emergency without auto-dialing**  
+   Tap `Emergency`: `"I cannot breathe."`  
+   Aasa prepares the emergency dialer and trusted-contact message. It uses `ACTION_DIAL`, never `ACTION_CALL`.
 
-## 4. Repository layout (workspace root)
+6. **Scam and fraud shield**  
+   Tap `Scam Alert`.  
+   Aasa highlights warning signals like gift cards, urgency, and "do not tell anyone," then suggests a safe next step in respectful language.
 
-```
-aasa/
-├── Aasa/                    # Android app (Kotlin / Compose / Material 3)
-├── AasaGemmaBridgePoc/      # Older standalone Android POC (legacy; Phase 0.5)
-├── aasa-gemma-server/       # Mac-side FastAPI ↔ Ollama bridge (Python)
-└── AASA_PROJECT_OVERVIEW.md # this file
-```
+7. **Medicine and document lens**  
+   Use the Home lens control to photograph a medicine label or document. Medicine Lens reads OCR text, compares it to the routine medicine list, and shows a safety receipt. Document Reader summarizes visible details like amounts, dates, references, and risk cues.
 
-The active product is `Aasa/` + `aasa-gemma-server/`. `AasaGemmaBridgePoc/` predates Phase 1 and is not part of the build pipeline.
+8. **Morning briefing**  
+   Open Morning Briefing. Aasa reads Health Connect when available; otherwise it shows the required `Demo data - no wearable connected` pill and gives a gentle non-medical summary.
 
-## 5. Component map
+9. **Fall and mobility screens**  
+   Open Fall Triage or Mobility Shield. Simulate a fall or run a 10-second walk check. Aasa describes risk and confidence without diagnosing.
 
-```
-                        ┌─────────────────────────────┐
-                        │  Mac (developer machine)    │
-                        │  ┌─────────────────────┐    │
-                        │  │  Ollama (gemma4:e2b)│    │
-                        │  └────────▲────────────┘    │
-                        │           │                 │
-                        │  ┌────────┴────────────┐    │
-                        │  │  FastAPI bridge     │    │
-                        │  │  aasa-gemma-server  │    │
-                        │  │  POST /agent/message│    │
-                        │  └────────▲────────────┘    │
-                        └───────────┼─────────────────┘
-                                    │ adb reverse tcp:8000
-                                    │
-                        ┌───────────┴─────────────────┐
-                        │  Pixel 4a (Android app)     │
-                        │                             │
-                        │  HomeScreen ──► HomeVM      │
-                        │   ▲   ▲          │          │
-                        │   │   │          ▼          │
-                        │   │   │   AgentOrchestrator │
-                        │   │   │     │       │       │
-                        │   │   │     ▼       ▼       │
-                        │   │   │  ToolRegistry       │
-                        │   │   │   (9 AgentTools)    │
-                        │   │   │     │               │
-                        │   │   │     ▼               │
-                        │   │   │  Repositories       │
-                        │   │   │     │               │
-                        │   │   │     ▼               │
-                        │   │   │  Room (aasa.db)     │
-                        │   │   │                     │
-                        │   │   └── STT / TTS         │
-                        │   │      (foreground)       │
-                        │   │                         │
-                        │   └── Sensors (Fall, Walk)  │
-                        │       (foreground only)     │
-                        └─────────────────────────────┘
-```
+10. **Daily heartbeat and neighbor helper**  
+    Show the daily check-in card and explain the escalation: if no activity appears in the learned morning window, Aasa prepares a wellness check. A paired neighbor helper flow exists, but only activates when both provider and recipient consent flags are granted.
 
-## 6. Phase history (chronological)
+**Closing line:** "The important design choice is not that Aasa can call a tool. It is that the phone keeps the safety rules, the database facts, and the final confirmation local and visible."
 
-The codebase carries phase markers in comments and commit messages. Reading the phases in order is the fastest way to understand why a piece of code looks the way it does.
+## 3. What Is Implemented
 
-| Phase | What landed | Key artifacts |
-|------:|---|---|
-| 0.5 | Initial Bridge POC | `AasaGemmaBridgePoc/` (legacy, not in active app) |
-| 1   | Android skeleton (Compose, Material 3, Nav) | `Aasa/` package layout, Home placeholder |
-| 2   | Connect HomeScreen to FastAPI bridge | `RetrofitClient`, `ApiService`, `RemoteLocalGemmaRunner`, `ApiModels` |
-| 3   | Agentic dispatch | `AgentOrchestrator`, `ToolRegistry`, 6 mock tools, deferred-confirmation seed |
-| 3.5 | Deterministic safety override | `SafetyKeywords` (HIGH/MEDIUM phrases), orchestrator override |
-| 4   | Real persistence | Room: 5 entities, 4 DAOs, 4 repositories; `AasaApplication` service locator; `DemoDataSeeder` |
-| 4.x | Intent overrides for medication + memory | `IntentKeywords` (medication-check, medication-log, memory-save) |
-| 5   | Per-feature screens | `MedicationScreen`, `MemoryScreen`, `TrustedCircleScreen` + their VMs/UiStates |
-| 6   | Voice-first | `SpeechToTextManager`, `TextToSpeechManager`, mic permission, `RECORD_AUDIO` |
-| 7   | Deferred-confirmation action cards | `ContactActionCard`, `SafetyActionCard`, `EmergencyActionCard`, `IntentActionLauncher` |
-| 8   | Local Gemma status card + demo affordances | `GemmaConnectionState` + health probe; `DemoScenarios`; "Reset demo data" |
-| 8.5 | Scam & Fraud Shield | `ScamShieldTool`, `ScamKeywords`, `ScamShieldScreen` |
-| 8.6 | Fall Triage | `FallDetectionManager`, `FallTriageTool`, `FallTriageKeywords`, `FallTriageScreen` |
-| 8.7 | Mobility Shield | `MobilitySensorManager`, `MobilityFeatureExtractor`, `MobilityShieldTool`, `MobilityShieldScreen` |
-| 9   | **On-device Gemma 4 via LiteRT-LM** | `model/GemmaRunner`, `OnDeviceGemmaRunner`, `RemoteGemmaRunner`, `GemmaRouter`, `OnDevicePromptBuilder`. Bridge demoted to dev fallback. |
-| 10  | **Morning Briefing (Health Connect, wearable-ready)** | `data/repository/HealthSnapshotRepository`, `tools/HealthBriefingTool`, `ui/briefing/HealthBriefingScreen`, `ui/briefing/HealthBriefingViewModel`. Read-only Health Connect access, mandatory demo-data pill, on-device summarization. |
+### Core Agent
 
-## 7. The agent flow (one user turn end-to-end)
+- `AgentOrchestrator` is the single entry point for text or voice turns.
+- `GemmaRouter` chooses on-device Gemma 4 via LiteRT-LM when the side-loaded model is available.
+- `RemoteLocalGemmaRunner` keeps the Mac FastAPI/Ollama bridge as an optional developer fallback.
+- `OnDevicePromptBuilder` mirrors the server JSON contract and parses Gemma output into `AgentMessageResponse`.
+- Deterministic overrides run on the raw user message before any tool executes.
+- Every tool returns a `ToolResult`; tools do not directly dial, text, or alert.
 
-`HomeViewModel.sendMessage(text)` calls `AgentOrchestrator.handleUserMessage(text)`:
+### Voice and Greeting
 
-1. **Persist** the user message into `conversations` table (role=`USER`).
-2. **Call** the FastAPI bridge → Ollama → Gemma → JSON.
-3. **Map** the network DTO (`AgentMessageResponse`) into a domain `AgentAction` with `Map<String, Any?>` arguments (`AgentModels.kt:toAgentAction`).
-4. **Run deterministic overrides** on the *raw user message* (in priority order — see §8). The override may rewrite `intent`, `tool`, `riskLevel`, `assistantResponse`, and inject extra `arguments`.
-5. **Dispatch** through `ToolRegistry.execute(action)` to the matching `AgentTool`. Tools may read/write Room.
-6. **If** the tool returned a non-blank `ToolResult.message`, **overwrite** `assistantResponse` with that message so the spoken / displayed reply matches what actually happened (e.g. "Today's medication status: BP tablet → taken.").
-7. **Persist** the assistant turn into `conversations` (role=`ASSISTANT`, with `intent` / `riskLevel` / `tool`).
-8. **Return** an `AgentExecutionResult(action, toolResult)` to `HomeViewModel`.
-9. `HomeViewModel` parses `toolResult.data["actionType"]` into a `PendingAction` payload, updates `HomeUiState`, and triggers TTS for the spoken reply.
+- `SpeechToTextManager` wraps Android `SpeechRecognizer`.
+- `TextToSpeechManager` wraps Android TTS.
+- `GreetingBuilder` creates warm time-of-day greetings.
+- `HomeViewModel.maybeGreetUser()` speaks the greeting once per session/cooldown.
+- If mic permission is granted, `TtsEvent.Done` can chain into listening so the elder can answer hands-free.
 
-## 8. Deterministic overrides (most distinctive design choice)
+### Local Data
 
-Lives in `AgentOrchestrator.applyDeterministicOverrides(userMessage, action)`. **Order matters**:
+- Room database: `aasa.db`.
+- Tables: medications, medication logs, memories, trusted contacts, conversations, and presence pings.
+- `DemoDataSeeder` seeds:
+  - `BP tablet`, `1 tablet`, `08:00 AM`
+  - `Priya`, daughter, primary care recipient/contact
+  - `Mrs Wong`, neighbor helper paired to Priya, consent-gated
+  - favorite music memory: old Hindi songs from the 1970s
+- `Reset demo data` clears Room and re-seeds the demo baseline.
 
-```
-0a. Mobility-check synthetic prompt  → MobilityShieldTool / MOBILITY_CHECK
-0.  Fall-triage synthetic prompt     → FallTriageTool / FALL_TRIAGE
-1.  HIGH safety phrase               → SafetyTool / HIGH
-1.  MEDIUM safety phrase             → SafetyTool / MEDIUM
-1b. Scam analysis trigger            → ScamShieldTool / ANALYZE_SCAM
-1c. Health briefing trigger          → HealthBriefingTool / HEALTH_BRIEFING
-2.  Medication check query           → MedicationTool / CHECK_MEDICATION
-2.  Medication log statement         → MedicationTool / LOG_MEDICATION
-3.  Memory save statement            → MemoryTool / SAVE_MEMORY
-else                                 → trust Gemma (only `arguments` enriched with `userMessage`)
+### Safety and Care Features
+
+- Medication log/check with persisted state.
+- Memory save with simple type derivation.
+- Trusted contact call preparation.
+- Medium and high safety triage.
+- Scam and fraud analysis.
+- Fall triage after synthetic fall events or screen simulation.
+- Mobility confidence from a foreground-only 10-second sensor recording.
+- Morning briefing from Health Connect or explicit mock data.
+- Daily heartbeat using presence pings, foreground activity, spoken interaction, and conversation activity.
+- Neighbor helper escalation when paired contact consent is present.
+- Medicine Lens OCR with conservative medicine explanation and safety receipt.
+- Document Reader OCR with plain-language summary and risk cues.
+- Opt-in "Hey Aasa" foreground service behind a build flag.
+
+## 4. Non-Negotiable Rules
+
+- **No diagnosis.** Aasa describes observations and next steps, not medical conditions.
+- **No auto-dial or auto-SMS.** The UI launches `ACTION_DIAL` or `ACTION_SENDTO`; the elder still taps call/send.
+- **Local-first.** Room stores app data on-device. The default model path is on-device Gemma 4. The Mac bridge is a dev fallback only.
+- **Deterministic safety wins.** If local keyword rules detect a higher risk than Gemma, the local rule wins.
+- **Deferred confirmation.** Tools prepare action cards; they do not take irreversible actions.
+- **Background sensing is off by default.** The only background-style feature is the hackathon hotword service, and it requires a build flag, explicit toggle, mic permission, and a persistent notification.
+- **Wearable data honesty.** If Health Connect data is unavailable, Morning Briefing must show the demo-data pill.
+- **OCR humility.** Medicine and document reading are helpers, not authoritative verification.
+
+## 5. Repository Layout
+
+```text
+gemmaPoc/
++-- Aasa/                    # Active Android app: Kotlin, Compose, Room, LiteRT-LM
++-- aasa-gemma-server/       # Optional Mac FastAPI -> Ollama bridge
++-- AasaGemmaBridgePoc/      # Legacy proof of concept, not active
+`-- AASA_PROJECT_OVERVIEW.md # This file
 ```
 
-Every match also injects `arguments["userMessage"] = <original message>` so downstream tools can re-scan it.
+## 6. Main Architecture
 
-The trigger lists live as **plain substring matches on a lowercased view** of the user's text:
-
-- `tools/SafetyKeywords.kt` — HIGH (`chest pain`, `cannot breathe`, `fell down`, `fainted`, `severe weakness`) + MEDIUM (`feel weak`, `dizzy`, `missed my medicine`, …)
-- `tools/IntentKeywords.kt` — medication nouns + check triggers + log triggers + memory-save triggers + mobility-check triggers + memory-type derivation
-- `tools/ScamKeywords.kt` — gift-card / wire-transfer / OTP / urgent-threat patterns
-- `tools/FallTriageKeywords.kt` — URGENT_RISK / NON_EMERGENCY_INJURY / FALSE_ALARM phrase classifier
-
-Why substrings, not regex? Substrings are easier to reason about and less likely to silently miss a phrasing. The orchestrator was burned twice by regex word-boundary edge cases (`"did I take BP tablet"`).
-
-**Risk aggregation rule everywhere**: take the *worst* of `(deterministic phrase scan, Gemma's risk level)`. We never downgrade. See `SafetyTool`, `FallTriageTool`, `MobilityShieldTool`.
-
-## 9. Tool catalog (all 10 `AgentTool`s)
-
-Every tool implements `interface AgentTool { val name; suspend fun execute(action: AgentAction): ToolResult }`. Tool names live in `tools/AgentTool.kt#ToolNames`.
-
-| Tool | Name string | Persists? | Triggers UI action card? |
-|---|---|---|---|
-| `ChatTool` | `ChatTool` | No | No (just echoes assistant response) |
-| `MedicationTool` | `MedicationTool` | **Yes** (`medications`, `medication_logs`) | No |
-| `MemoryTool` | `MemoryTool` | **Yes** (`memories`) | No |
-| `ReminderTool` | `ReminderTool` | No (placeholder) | No |
-| `SafetyTool` | `SafetyTool` | No | **Yes** — `ALERT_TRUSTED_CONTACT` (MEDIUM) or `HIGH_RISK_SAFETY` (HIGH) |
-| `TrustedContactTool` | `TrustedContactTool` | No | **Yes** — `CALL_CONTACT` |
-| `ScamShieldTool` | `ScamShieldTool` | No | **Yes** — `SCAM_ANALYSIS` |
-| `FallTriageTool` | `FallTriageTool` | No | **Yes** — `FALL_TRIAGE` |
-| `MobilityShieldTool` | `MobilityShieldTool` | No | **Yes** — `MOBILITY_CHECK` |
-| `HealthBriefingTool` | `HealthBriefingTool` | No | **Yes** — `HEALTH_BRIEFING` (rendered on the Morning Briefing screen) |
-
-Per-tool notes worth knowing:
-
-- **`MedicationTool`** — `LOG_MEDICATION` does `findOrCreate` + insert log row. `CHECK_MEDICATION` does a JOIN against `medications` + `medication_logs` and returns `"Today's medication status: BP tablet → taken."` Defaults: `medicineName="medicine"`, `status="taken"`.
-- **`MemoryTool`** — falls back to `arguments["userMessage"]` for value when Gemma left fields empty. Tries to derive `"<Name> - birthday"` from `"<Name>'s birthday"` patterns.
-- **`SafetyTool`** — needs `TrustedContactRepository` to attach a contact to the action card. MEDIUM emits a "Alert Priya?" card; HIGH emits an emergency-dialer-+-alert card. Pre-baked `alertMessage` SMS bodies live in `companion object`.
-- **`FallTriageTool`** — combines Gemma's `triageCategory` with `FallTriageKeywords.classify()` via "worst wins". Always returns `success=true` so the UI can render the triage card even with no contact, with a friendly "no trusted contact set up" message appended.
-- **`MobilityShieldTool`** — score 0–100, `LOW ≥ 80`, `MEDIUM 60–79`, `HIGH < 60`. Echoes `featureSummary` back to the UI for the bar-chart-y card.
-- **`ScamShieldTool`** — strips `"analyze this suspicious message:"` prefixes via `ScamKeywords.extractMessageText()`, then scans for HIGH signals (gift card / OTP / wire transfer / urgent money / "don't tell family") and MEDIUM (suspicious link / account locked).
-- **`HealthBriefingTool`** (Phase 10) — reads the last-24h snapshot from `HealthSnapshotRepository` (sleep hours, average resting heart rate, total steps) and produces a gentle, on-device summary. When Health Connect is unavailable, not installed, or permissions weren't granted, the repository returns a mock snapshot with `isMockData = true` so the UI **must** show the "Demo data — no wearable connected" pill. No medical claims; the summary always ends with "This is just a friendly check-in, not a medical opinion."
-
-`ToolResult.data` keys are constants in `tools/ToolResult.kt#ToolResultKeys`. UI action types are constants in `ToolActionTypes`. **Never use string literals** for these in new code.
-
-## 10. Data model (Room schema, version 1)
-
-Database name: `aasa.db`. `fallbackToDestructiveMigration()` is on (hackathon stance — replace with real migrations before shipping). All entities live in `data/entity/`, DAOs in `data/dao/`, repositories in `data/repository/`. Wired in `data/AppDatabase.kt`.
-
-| Table | Entity | Notable columns |
-|---|---|---|
-| `medications` | `MedicationEntity` | `id, name, dosage?, scheduleTime?, createdAt, nameLower (unique)` |
-| `medication_logs` | `MedicationLogEntity` | `id, medicationId (FK CASCADE), status, loggedAt` |
-| `memories` | `MemoryEntity` | `id, type, title, value, createdAt` |
-| `trusted_contacts` | `TrustedContactEntity` | `id, name, relationship, phoneNumber, isPrimary, nameLower (unique)` |
-| `conversations` | `ConversationEntity` | `id, role (USER/ASSISTANT), message, intent?, riskLevel?, tool?, createdAt` |
-
-`DemoDataSeeder` runs on cold start (idempotent) and seeds:
-
-- one `MedicationEntity("BP tablet", "1 tablet", "08:00 AM")`
-- one `TrustedContactEntity("Priya", "Daughter", "+91-9000000001", isPrimary=true)`
-- one `MemoryEntity(type="FAVORITE_MUSIC", title="Favorite music", value="Old Hindi songs from the 1970s")`
-
-The "Reset demo data" button on Home calls `AasaApplication.resetDemoData()` → `DemoDataSeeder.reset()` → `clearAllTables()` + re-seed.
-
-## 11. Voice (Phase 6)
-
-- `voice/SpeechToTextManager.kt` — wraps Android `SpeechRecognizer`. Emits `SpeechEvent` (Ready, Begin, End, Partial, Recognized, Error). Mic permission is requested per `RECORD_AUDIO`.
-- `voice/TextToSpeechManager.kt` — wraps Android `TextToSpeech`. Locale fallback to `Locale.US`. Emits `TtsEvent` (Ready, Started, Done, Error). Released in `onCleared`.
-- Both managers are owned by `HomeViewModel` and never start automatically; the UI flips them via mic-button taps.
-- `AndroidManifest.xml` includes the necessary `<queries>` for `RecognitionService` and `TTS_SERVICE` (Android 11+ package visibility).
-
-## 12. Sensors (foreground-only)
-
-- **`sensors/FallDetectionManager.kt`** (Phase 8.6) — `TYPE_ACCELEROMETER` at `SENSOR_DELAY_GAME` (~20 Hz). Heuristic: spike > 25 m/s² → 2.5 s stillness window → if ≥ 1.5 s of near-gravity samples → emit `PossibleFall`. State machine: `IDLE → MONITORING → POSSIBLE_FALL`. There's also a `simulateFall()` for demos. The `FallTriageScreen` ViewModel collects events and triggers the spoken triage flow.
-- **`sensors/MobilitySensorManager.kt`** (Phase 8.7) — fixed 10-second recording (`RECORDING_DURATION_MS`). Records accelerometer + gyroscope (when present), then auto-stops. Emits `MobilityCheckEvent.Completed(samples)`.
-- **`sensors/MobilityFeatureExtractor.kt`** — turns sample arrays into `MobilityFeatures(mobilityConfidenceScore, stabilityLabel, averageAcceleration, accelerationVariance, peakAcceleration, sideToSideSwayScore, abruptPauses, smoothnessScore)`. **Hackathon-grade** — no clinical gait analysis, never claims to.
-
-Both managers explicitly: never run in background, never persist raw samples to disk, never expose continuous-monitoring APIs.
-
-## 13. UI structure
-
-`Aasa/app/src/main/java/com/aasa/eldercare/ui/`
-
-- `AppNavigation.kt` — Compose `NavHost` with eight routes:
-  - `home` (default), `medication`, `memory`, `trusted_circle`, `scam_shield`, `fall_triage`, `mobility_shield`, `health_briefing`
-- `home/HomeScreen.kt` (~1500 LOC) — the "command center". Hosts:
-  - mic button + recognized-speech card
-  - text input + sample chips (`DemoScenarios.ALL`)
-  - Gemma connection status card (driven by `GemmaConnectionState`)
-  - parsed response card / raw response card
-  - tool-execution result card with "Saved in Room" pill
-  - **action cards** (`ContactActionCard`, `SafetyActionCard`, `EmergencyActionCard`, scam-analysis card) — only one is visible at a time, gated by `HomeUiState.show*ActionCard`
-  - recent-conversations card (live `Flow` from Room)
-  - "Reset demo data" + nav shortcuts to feature screens
-- `home/HomeUiState.kt` — single state class for everything above. Includes `RiskCopy` and `ScamRiskCopy` helpers that map raw `LOW/MEDIUM/HIGH` strings to elder-friendly labels.
-- `home/RiskBadge.kt` — colored pill matching `RiskCopy.RiskLevel`.
-- `home/{Contact,Safety,Emergency}ActionCard.kt` — the deferred-confirmation cards. Each has explicit "Open Dialer" / "Open SMS" / "Dismiss" buttons that call `IntentActionLauncher`.
-- `IntentActionLauncher.kt` — `Intent.ACTION_DIAL` and `Intent.ACTION_SENDTO` only. `try/catch ActivityNotFoundException` with a friendly toast fallback.
-- Each feature screen has a matching `*ViewModel`, `*UiState`, and Compose screen file.
-
-## 14. Server bridge (`aasa-gemma-server/`)
-
-Tiny FastAPI app:
-
-- `main.py` — `POST /agent/message` and `GET /health`. Plus an in-memory `medication_log` (legacy POC fallback that the Android app no longer relies on now that Room exists, but the server still runs it).
-- `gemma_client.py` — calls `ollama` HTTP and parses JSON.
-- `prompt_builder.py` — the **system prompt** that makes Gemma return the structured JSON contract (intents, tools, risk levels, scam rules, fall triage rules, mobility rules). This is a critical file — changes to intents/tools require updates here too.
-- `medication_log.py` — name-extraction helpers used by the in-memory POC log.
-- Default Ollama model: `gemma4:e2b` (override via `OLLAMA_MODEL` env var).
-- Reachable from the device via `adb reverse tcp:8000 tcp:8000`. The Android `network_security_config.xml` permits cleartext for `127.0.0.1`.
-
-## 15. Build & run (developer cheat sheet)
-
-**Server (Mac):**
-```bash
-cd aasa-gemma-server
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-ollama list           # confirm gemma4:e2b is available, or set OLLAMA_MODEL
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-curl http://127.0.0.1:8000/health
+```text
+HomeScreen / feature screens
+        |
+        v
+HomeViewModel / feature ViewModels
+        |
+        v
+AgentOrchestrator
+        |
+        +--> GemmaRouter
+        |       +--> OnDeviceGemmaRunner (LiteRT-LM, default)
+        |       +--> RemoteLocalGemmaRunner (FastAPI/Ollama fallback)
+        |
+        +--> deterministic overrides
+        |
+        v
+ToolRegistry
+        |
+        v
+AgentTool implementations
+        |
+        v
+Room repositories / Android intents / OCR / Health Connect / sensors
 ```
 
-**Android (Pixel 4a, USB-attached):**
-```bash
-adb devices
-adb reverse tcp:8000 tcp:8000
-cd Aasa
-./gradlew :app:installDebug
-adb shell am start -n com.aasa.eldercare/.MainActivity
+One turn in practice:
+
+1. Save the user message to `conversations`.
+2. Ask the selected model runner for a JSON action.
+3. Convert JSON to `AgentAction`.
+4. Apply deterministic overrides to route safety, scam, medication, memory, mobility, health, wellness, and neighbor flows.
+5. Execute the matching local `AgentTool`.
+6. If the tool returns a better grounded message, use it as the final assistant response.
+7. Save the assistant turn to `conversations`.
+8. Update UI state and speak the response.
+
+## 7. Deterministic Override Order
+
+The override order in `AgentOrchestrator` matters:
+
+```text
+0a. Mobility check synthetic prompt -> MobilityShieldTool
+0.  Fall triage synthetic prompt    -> FallTriageTool
+1.  HIGH safety phrase              -> SafetyTool / HIGH
+1.  MEDIUM safety phrase            -> SafetyTool / MEDIUM
+1c. Health briefing request         -> HealthBriefingTool
+1d. Neighbor check request          -> NeighborCheckTool
+1d. Wellness check request          -> WellnessCheckTool
+1b. Scam analysis trigger           -> ScamShieldTool
+2.  Medication check query          -> MedicationTool / CHECK_MEDICATION
+2.  Medication log statement        -> MedicationTool / LOG_MEDICATION
+3.  Memory save statement           -> MemoryTool / SAVE_MEMORY
+else                                -> trust Gemma action, with userMessage added
 ```
 
-**Permissions to grant on the device first run:**
-- `RECORD_AUDIO` (mic)
-- *Optional* — Health Connect read access for **Sleep**, **Heart Rate**, **Steps** (Phase 10). Granted from the Morning Briefing screen via the "Grant Health Connect access" button. If skipped, the Morning Briefing still works and surfaces the mandatory "Demo data — no wearable connected" pill.
-
-**Re-seed demo data:** tap "Reset demo data" on the Home screen, or:
-```bash
-adb uninstall com.aasa.eldercare && ./gradlew :app:installDebug
-```
-
-## 16. Demo scenarios shipped in `DemoScenarios.ALL`
-
-| Label | Phrase | Routed tool |
-|---|---|---|
-| Medication | "I took my BP tablet." | `MedicationTool` (LOG) |
-| Memory | "My granddaughter Ananya's birthday is May 12." | `MemoryTool` (SAVE) |
-| Safety | "I feel weak and missed my medicine." | `SafetyTool` (MEDIUM) |
-| Emergency | "I cannot breathe." | `SafetyTool` (HIGH) |
-| Call Priya | "Call Priya." | `TrustedContactTool` |
-| Scam Alert | "Analyze this suspicious message: Hi Grandma, I'm in trouble … gift cards …" | `ScamShieldTool` (HIGH) |
-
-## 17. Gradle / dependency stack
-
-`Aasa/app/build.gradle.kts`:
-
-- **Plugins**: `com.android.application` 8.2.2, `kotlin.android` 1.9.22, `ksp` 1.9.22-1.0.17
-- **SDK**: `compileSdk 34`, `minSdk 24`, `targetSdk 34`. Java 17.
-- **Compose BOM**: `2024.02.02`. Material 3, Foundation, Material Icons Core. Activity Compose `1.8.2`. Navigation Compose `2.7.7`.
-- **Lifecycle**: `2.7.0` (runtime-ktx + viewmodel-compose).
-- **Coroutines**: `1.7.3`.
-- **Networking**: Retrofit `2.9.0` + Gson converter, OkHttp logging interceptor `4.12.0`.
-- **Room**: `2.6.1` (runtime + ktx + KSP compiler).
-- **On-device LLM**: `com.google.ai.edge.litertlm:litertlm-android:0.11.0` (Phase 9).
-- **Health Connect**: `androidx.health.connect:connect-client:1.1.0-alpha07` (Phase 10, read-only).
-- **No Hilt / Dagger / Koin** — DI is the hand-rolled `AasaApplication` service locator.
-
-## 18. Things deliberately *not* yet done
-
-If the user asks you to add any of these, treat as new feature work, not bug fixing.
-
-- Room migrations (currently `fallbackToDestructiveMigration()`).
-- Real DI (Hilt). Service locator is intentional Phase-< 9 scaffolding.
-- Background fall detection (foreground service + `BOOT_COMPLETED` receiver). Explicitly out of scope for the hackathon build.
-- Reminders persistence — `ReminderTool` is still a placeholder.
-- Multi-contact trusted circle UI flow. Schema supports it; the seeder + UI assume one primary.
-- Swappable on-device model (e.g. MediaPipe / TFLite Gemma). ~~Today it's purely server-bridged.~~ *(Done in Phase 9: LiteRT-LM + Gemma 4 E2B `.litertlm`, with the bridge demoted to a dev fallback.)*
-- Multi-language. Strings are English; locale fallback exists for TTS only.
-- Real automated tests. There is no `app/src/test/` or `androidTest/` worth referencing.
-- Crash reporting / analytics. None wired up.
-- Migrating off the legacy in-memory medication log in `aasa-gemma-server/main.py`.
-
-## 19. Glossary (pulled from the codebase)
-
-- **Action card** — Compose card on the Home screen that asks the elder for explicit confirmation before launching a dialer/SMS intent. Driven by `HomeUiState.pending*` fields.
-- **AgentAction** — domain model after JSON → Kotlin mapping. `intent / riskLevel / tool / arguments / assistantResponse / rawResponse`.
-- **AgentExecutionResult** — `(action, toolResult)` returned from `AgentOrchestrator`.
-- **Deferred confirmation** — the design rule that tools never act, they only return a payload the UI renders as an action card with explicit elder-controlled buttons.
-- **Deterministic override** — on-device, substring-based rules that rewrite Gemma's routing before tool dispatch.
-- **GemmaConnectionState** — `UNKNOWN / CONNECTING / CONNECTED / DISCONNECTED`. Driven by a periodic `/health` probe.
-- **PendingAction** — `HomeViewModel.PendingAction` + the matching `HomeUiState.pending*` fields.
-- **ServiceLocator** — `AasaApplication`. Lazily instantiates `AppDatabase`, repositories, `ToolRegistry`, and `AgentOrchestrator`.
-- **Tool** — implementer of `AgentTool`. Always `suspend`. Reads/writes through repositories. Returns `ToolResult`.
-- **ToolResult.data["actionType"]** — the bridge between the tool and the UI action card.
-- **`userMessage`** — special key the orchestrator injects into `arguments` so downstream tools can re-scan the original user input regardless of Gemma's parsing.
+The raw user text is always injected as `arguments["userMessage"]` so downstream tools can re-scan it.
 
-## 20. How to use this doc
+## 8. Tool Catalog
 
-When opening a new chat with an AI assistant about Aasa, paste:
+Tool names are constants in `ToolNames`; action-card payload keys live in `ToolResultKeys`.
 
-> Read `AASA_PROJECT_OVERVIEW.md` at the workspace root before answering anything. It records the architecture, the deliberate hackathon-grade vs. production-grade decisions, the tool catalog, and the deterministic safety override rules. Then I'll give you my actual question.
+| Tool | Main role | Persists? | Action card? |
+|---|---|---:|---:|
+| `ChatTool` | Plain assistant reply | No | No |
+| `MedicationTool` | Log/check medicine | Yes | No |
+| `MemoryTool` | Save elder facts | Yes | No |
+| `ReminderTool` | Placeholder reminder acknowledgement | No | No |
+| `SafetyTool` | Medium/high safety escalation | No | Yes |
+| `TrustedContactTool` | Prepare contact call | No | Yes |
+| `ScamShieldTool` | Analyze suspicious messages | No | Yes |
+| `FallTriageTool` | Classify fall response | No | Yes |
+| `MobilityShieldTool` | Explain walk-check confidence | No | Yes |
+| `HealthBriefingTool` | Summarize Health Connect snapshot | No | Yes/result screen |
+| `WellnessCheckTool` | Prepare daily heartbeat check-in | No | Yes |
+| `NeighborCheckTool` | Prepare paired-neighbor check | No | Yes |
+| `DocumentReaderTool` | Summarize OCR document text | No | Yes/result card |
 
-Then state the actual question.
+## 9. Screens and Routes
 
----
+Routes in `AppNavigation`:
 
-## 21. Phase 9 — On-device Gemma 4 via LiteRT-LM
+- `home`: command center, voice input, demo chips, action cards, medicine/document lens, heartbeat, model status, recent conversations.
+- `medication`: persisted medication list and logs.
+- `memory`: saved memories.
+- `trusted_circle`: trusted contacts and consent/provider state.
+- `scam_shield`: dedicated suspicious-message analysis.
+- `fall_triage`: foreground fall detection and simulated fall flow.
+- `mobility_shield`: foreground walk check and confidence explanation.
+- `health_briefing`: Health Connect / demo-data morning summary.
 
-Aasa now runs **Gemma 4 E2B directly on the phone** through Google's LiteRT-LM Kotlin SDK (`com.google.ai.edge.litertlm:litertlm-android`). The Mac bridge is retained but demoted to a dev fallback.
-
-### Runtime stack
-
-- **Model file**: `gemma-4-E2B-it.litertlm` (int4, ~2.4 GB) from `litert-community/gemma-4-E2B-it-litert-lm` on HuggingFace (Gemma license, gated).
-- **Library**: LiteRT-LM, Kotlin/Coroutines API (`Engine`, `Conversation`, `sendMessageAsync(...): Flow<Message>`).
-- **Backend**: `Backend.CPU()` on the Pixel 4a (no Adreno 618 GPU path; no NPU). Higher-end devices can opt into `Backend.GPU()` later — Snapdragon 8 Elite chips even have a dedicated NPU `.litertlm` variant.
-- **Pixel 4a perf reality**: ~80–120 prefill tk/s, ~6–10 decode tk/s, TTFT 4–7 s. Typical 60-token JSON response takes **10–15 s end-to-end**. Demoed turns are kept short; the bridge handles long prompts (scam paste).
-
-### Architecture
-
-```
-                  AgentOrchestrator
-                          │
-                          ▼
-                   GemmaRouter (ModelRunner)
-                          │
-            ┌─────────────┴──────────────┐
-            ▼                            ▼
-    OnDeviceGemmaRunner            RemoteGemmaRunner
-    (LiteRT-LM + Gemma 4)          (FastAPI → Ollama, dev fallback)
-            │                            │
-            └────────► same AgentMessageResponse JSON shape ◄────────┘
-                       (then same deterministic overrides, ToolRegistry, Room)
-```
-
-### Routing rules (`GemmaRouter`)
+## 10. Feature Notes for the Demo
 
-1. On-device runner reports `isAvailable() == true` → on-device.
-2. Otherwise → show a local setup error with the exact model path.
-3. If the app is built with `-PaasaEnableGemmaBridge=true`, the router may use the Mac bridge as a developer fallback.
+### Medication
 
-The router exposes `activeRunnerLabel` ("On-device · Gemma 4 E2B" vs "Mac bridge · gemma4:e2b") + `lastRoutingReason` so the Home status card can show *why* the active runner won.
+Files: `MedicationTool`, `MedicationRepository`, `MedicationScreen`, `DemoDataSeeder`.
 
-### Files
+Say: "This is not a model pretending to remember. It writes a medication log row and then reads it back."
 
-| File | Role |
-|---|---|
-| `model/ModelRunner.kt` | Interface — extended with `label: String` and `suspend fun isAvailable(): Boolean`. |
-| `model/RemoteLocalGemmaRunner.kt` | (Kept name for now; thin wrapper around FastAPI bridge.) Implements `isAvailable()` via `/health` probe. |
-| `model/OnDeviceGemmaRunner.kt` | Wraps `com.google.ai.edge.litertlm.Engine`. Pre-warms engine on first `isAvailable()` call; reuses a single long-lived `Conversation` per app process. |
-| `model/OnDevicePromptBuilder.kt` | Trimmed system prompt mirroring `aasa-gemma-server/prompt_builder.py` plus a `parseModelOutput(text): AgentMessageResponse` that strips Markdown code-fences and extracts the first JSON object. |
-| `model/GemmaRouter.kt` | Implements `ModelRunner`, owns both runners, exposes `activeRunnerLabel` / `lastRoutingReason`. |
+Good prompts:
 
-### Model side-load (hackathon-grade delivery)
+- `"I took my BP tablet."`
+- `"Did I take my medicine today?"`
 
-The `.litertlm` file is **not bundled in the APK** (2.4 GB is way over Play Store limits and the model is license-gated anyway). It must be side-loaded to:
+### Memory
 
-```
-/sdcard/Android/data/com.aasa.eldercare/files/models/gemma-4-E2B-it.litertlm
-```
+Files: `MemoryTool`, `MemoryRepository`, `MemoryScreen`.
 
-Setup steps (one time per device — see `docs/MODEL_SETUP.md`):
+Say: "Aasa stores simple family context so later interactions can feel personal."
 
-```bash
-# After accepting the Gemma license at:
-# https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
-huggingface-cli login
-huggingface-cli download litert-community/gemma-4-E2B-it-litert-lm \
-  --local-dir ~/aasa-models/gemma-4-e2b-it-litert-lm \
-  --local-dir-use-symlinks False
+Good prompt:
 
-adb shell mkdir -p /sdcard/Android/data/com.aasa.eldercare/files/models
-adb push ~/aasa-models/gemma-4-e2b-it-litert-lm/gemma-4-E2B-it.litertlm \
-  /sdcard/Android/data/com.aasa.eldercare/files/models/gemma-4-E2B-it.litertlm
-```
+- `"My granddaughter Ananya's birthday is May 12."`
 
-If the file is absent the app boots fine, but model turns remain mobile-only and show a setup error with the expected path. For convenience, the runner accepts either the exact filename above or the first `.litertlm` file found in the same `models/` directory.
+### Trusted Circle and Deferred Actions
 
-### What is *not* yet done in Phase 9
+Files: `SafetyTool`, `TrustedContactTool`, `ContactActionCard`, `SafetyActionCard`, `EmergencyActionCard`, `IntentActionLauncher`.
 
-- **Native function calling via `@Tool` annotations.** The on-device path still uses the same prompt-engineered JSON contract as the bridge so the two are byte-identical downstream. A Phase 9.5 migration to LiteRT-LM `@Tool` / `@ToolParam` annotations is queued — that would eliminate JSON parsing entirely and let constrained decoding guarantee a valid tool call.
-- **In-app downloader.** The model is side-loaded via `adb push` for hackathon judging. A Phase 9.5 in-app downloader with progress UI is queued.
-- **GPU / NPU backends.** Pixel 4a is CPU-only here. Snapdragon 8 Elite users would benefit from `Backend.GPU()` and the dedicated `gemma-4-E2B-it_qualcomm_sm8750.litertlm` NPU variant.
-- **Pre-warming UX.** First inference on a cold engine pays the full initialization cost (up to 10 s per LiteRT-LM docs). The router warms the engine on app start in the background; the status card shows a "warming up" state.
+Say: "The agent can prepare a call or SMS, but it cannot send one. The elder stays in control."
 
----
+Good prompts:
 
-## 22. Phase 10 — Morning Briefing (Health Connect, wearable-ready)
+- `"Call Priya."`
+- `"I feel weak and missed my medicine."`
+- `"I cannot breathe."`
 
-Aasa now offers a **Morning Briefing**: a gentle, on-device summary of the last 24 hours of sleep, resting heart rate, and steps, read from **Android Health Connect** (wearable-agnostic — Fitbit Air, Pixel Watch, Galaxy Watch, etc. all write into the same on-device store).
+### Scam Shield
 
-This phase is intentionally tightly scoped. It is **one tool, one repository, one screen, one deterministic override** — no schema changes, no background jobs, no auto-syncing.
+Files: `ScamShieldTool`, `ScamKeywords`, `ScamShieldScreen`, Home scam result card.
 
-### Hard rules
+Say: "The tone matters here. Aasa does not shame the elder; it points out signals and gives one safe next step."
 
-- **No medical claims.** Copy is gentle and informational only. The briefing always closes with "This is just a friendly check-in, not a medical opinion."
-- **Mandatory demo-data pill.** When no wearable is connected (Health Connect not installed, permissions not granted, or no data in the last 24 h), the Morning Briefing screen **must** show the pill "**Demo data — no wearable connected**". We never present fake numbers as if they came from a real wearable.
-- **Read-only and on-device.** No data is written back to Health Connect. The snapshot never leaves the phone. The summary is generated by the on-device Gemma 4 turn + a deterministic text builder.
-- **Non-fatal everywhere.** If Health Connect is missing, the permission dialog fails, or any read throws, the repository quietly falls back to a deterministic mock snapshot.
+Good prompt:
 
-### Components
+- `"Analyze this suspicious message: Hi Grandma, I'm in trouble. Don't call anyone. Buy two Apple gift cards and send me the codes quickly."`
 
-| File | Role |
-|---|---|
-| `data/repository/HealthSnapshotRepository.kt` | Reads sleep / heart rate / steps from Health Connect for the last 24 h. Returns `HealthSnapshot(sleepHours, avgRestingHeartRateBpm, steps, capturedAtEpochMs, isMockData, source)`. Falls back to a mock snapshot when Health Connect is unavailable, ungranted, or empty. |
-| `tools/HealthBriefingTool.kt` | `AgentTool` named `ToolNames.HEALTH_BRIEFING`. Calls the repository, builds `highlights: List<String>` plus a multi-sentence `briefing: String`, returns a `ToolResult` with `actionType = HEALTH_BRIEFING`, `isMockData`, and the three raw numbers. |
-| `tools/IntentKeywords.kt#isHealthBriefingRequest` | Substring scan for morning-briefing phrasings (`"morning briefing"`, `"how did I sleep"`, `"how am I doing today"`, the synthetic `"Generate my morning briefing"` prompt, etc.). |
-| `agent/AgentOrchestrator.kt` | New override rule **1c — Health Briefing**, routed *after* safety so an emergency phrase still wins. |
-| `ui/briefing/HealthBriefingScreen.kt` | Compose screen: intro card, mandatory wearable-status pill, optional "Grant Health Connect access" card, big "Get my briefing" button, result card with highlights + paragraph, disclaimer footer. |
-| `ui/briefing/HealthBriefingViewModel.kt` | Fires the synthetic prompt `"Generate my morning briefing."` through `AgentOrchestrator`. The deterministic override always routes it to `HealthBriefingTool`, so the on-device Gemma 4 turn is decorative — the real numbers come from Health Connect. |
-| `ui/AppNavigation.kt` | New route `health_briefing` + composable wiring. |
-| `ui/home/HomeScreen.kt` | New `HealthBriefingEntryCard` plus a "Morning Briefing" entry in `NavigationShortcuts`. |
-| `AasaApplication.kt` | Adds `healthSnapshotRepository` lazy, wires it into `ToolRegistry.createDefault(...)`. |
-| `AndroidManifest.xml` | Adds the three Health Connect read permissions: `android.permission.health.READ_SLEEP`, `READ_HEART_RATE`, `READ_STEPS`. |
-| `app/build.gradle.kts` | Adds `androidx.health.connect:connect-client:1.1.0-alpha07`. |
+### Medicine Lens
 
-### How a Morning Briefing turn flows
+Files: `MedicineLensAnalyzer`, `HomeViewModel.analyzeMedicinePhoto`, Home lens UI.
 
-1. Elder taps **Open Morning Briefing** on Home → screen pushes route `health_briefing`.
-2. Elder taps **Get my briefing**.
-3. `HealthBriefingViewModel.generateBriefing()` calls `AgentOrchestrator.handleUserMessage("Generate my morning briefing.")`.
-4. Orchestrator runs the deterministic overrides; rule 1c matches → routes to `HealthBriefingTool` regardless of what Gemma classified the prompt as.
-5. `HealthBriefingTool.execute(...)`:
-   - Calls `HealthSnapshotRepository.fetchLast24h()`.
-   - Builds `highlights` (e.g. `"Sleep: 6.2 hours last night"`).
-   - Builds a 3–5 sentence `briefing` string with gentle, non-medical phrasing.
-   - Returns a `ToolResult` with `data["isMockData"]`, the raw numbers, `briefingText`, and `briefingHighlights`.
-6. `HealthBriefingViewModel` unpacks the `ToolResult.data` into `HealthBriefingUiState`.
-7. The screen renders:
-   - "**Demo data — no wearable connected**" pill if `isMockData == true`, otherwise a green "Live data from Health Connect" pill.
-   - A briefing card with bullet highlights + the paragraph.
-   - A disclaimer footer.
+Say: "This is on-device OCR plus conservative explanation. It can match routine medicines like the BP tablet, but it never certifies a pill as safe."
 
-The same prompts also work from the Home chat box — typing `morning briefing`, `how did I sleep`, or `how am I doing today` triggers the same tool via the deterministic override.
+What to show:
 
-### Wearable path (real data)
+- Camera/image picker from Home.
+- Safety receipt: what Aasa saw, routine medicine match, confidence, next step.
+- Duplicate-dose warning if the routine medicine is already logged today.
 
-Aasa does **not** integrate with any wearable SDK directly. Every supported wearable (Fitbit Air, Pixel Watch, Galaxy Watch, etc.) writes into Android Health Connect via its own companion app; Aasa reads from there. This means:
+### Document Reader
 
-- The repository is wearable-agnostic — no Fitbit-specific code, no Google Fit fallback, no vendor SDKs.
-- For real data on a device, the elder must (a) have a wearable companion app installed that writes to Health Connect, and (b) grant Aasa the three read permissions on the Morning Briefing screen.
-- For the hackathon demo we explicitly use the **mock snapshot path** — no real wearable is required, and the "Demo data" pill makes that obvious.
+Files: `DocumentReaderAnalyzer`, `DocumentReaderTool`, Home lens UI.
 
-### What is *not* done in Phase 10 (and intentionally so)
+Say: "The same lens can read a bill, letter, or form and pull out visible details like due dates, amounts, references, and risk cues."
 
-- **No background sync / no notifications.** The briefing is pull-on-demand only; we don't schedule a daily push.
-- **No Health Connect history beyond 24 h.** The repository explicitly windows to the last 24 h.
-- **No write-back.** Aasa never writes to Health Connect.
-- **No vendor SDKs** (Fitbit Web API, Google Fit, Samsung Health, etc.). Health Connect is the only path.
-- **No vitals beyond sleep / HR / steps.** SpO2, HRV, blood glucose, etc. are out of scope.
-- **No Room persistence of snapshots.** Each briefing turn reads fresh; we don't store historical wearable data.
+What to show:
 
----
+- Switch lens mode to document.
+- Photograph or select a page.
+- Result card with summary and risk band.
 
-*Last updated: Phase 10 — Morning Briefing (Health Connect, wearable-ready).*
+### Morning Briefing
 
----
+Files: `HealthSnapshotRepository`, `HealthBriefingTool`, `HealthBriefingScreen`.
 
-## 23. Phase 11 — Personalized launch greeting ("Good morning, Naveen.")
+Say: "Aasa is wearable-ready through Health Connect, not a vendor SDK. If no wearable is connected, it must say demo data."
 
-Aasa now opens every session with a warm, time-of-day-aware, name-personalized spoken greeting — the agent feels like a caregiver picking up the phone, not a chatbot waiting for input.
+Good prompts:
 
-### What it does
+- Tap `Get my briefing`.
+- From Home: `"How did I sleep?"` or `"Morning briefing."`
 
-When the Home screen comes into the foreground (cold launch, or re-entry after a 5-minute idle):
+### Fall Triage
 
-1. Look up the elder's stored name from `UserPreferences` (defaults to `"friend"`).
-2. Classify the current local hour into MORNING / AFTERNOON / EVENING / NIGHT (`GreetingBuilder.classifyHour`).
-3. Pick a random opener + check-in line from the matching copy bank, e.g. *"Good morning, Naveen. How are you feeling today?"*
-4. Speak it via the existing `TextToSpeechManager`.
-5. If mic permission is already granted, automatically start `SpeechToTextManager` the moment TTS finishes (`TtsEvent.Done`) — the elder can answer hands-free with zero taps.
-6. Stamp `lastGreetingAtMs` so back-nav / config changes inside the same session don't re-greet.
+Files: `FallDetectionManager`, `FallTriageTool`, `FallTriageScreen`.
 
-### Hard rule about the wake-word
+Say: "The sensor heuristic is foreground-only and hackathon-grade. The important piece is the triage flow after a possible fall."
 
-The user originally asked for a true *"Hey Aasa"* always-on hotword that wakes the device. That **was deliberately not implemented** because both production paths violate the project's non-negotiables (§3):
+What to show:
 
-- *Always-on foreground service holding the mic* → breaks "No background sensing."
-- *Continuous on-device hotword model* → still needs the mic open all the time, same problem; also unproven privacy story.
-- *Cloud hotword (Alexa-style)* → breaks "Local-first privacy. No cloud LLM."
+- Simulate fall.
+- Respond with `"I'm okay"` or `"I cannot get up"`.
+- Show false alarm vs emergency action path.
 
-Instead Phase 11 ships the **Google-Assistant-mediated launch path**: the manifest now registers `MainActivity` for `ACTION_ASSIST` and `ACTION_VOICE_COMMAND`, so any voice front-end (Google Assistant, Pixel Squeeze, Bixby, launcher voice search) can open Aasa with one phrase like *"Open Aasa"* or *"Hey Google, Aasa"*. The hotword stays inside the OS-level assistant process; **Aasa itself never holds an always-on mic**. Once Aasa is foregrounded, the Phase 11 greeting + auto-listen flow takes over.
+### Mobility Shield
 
-A true `"Hey Aasa"` hotword is queued as future work behind a clearly-labeled `ALLOW_BACKGROUND_HOTWORD` build flag with an opt-in onboarding screen — same shape as the `AASA_ENABLE_GEMMA_BRIDGE` dev fallback.
+Files: `MobilitySensorManager`, `MobilityFeatureExtractor`, `MobilityShieldTool`, `MobilityShieldScreen`.
 
-### Files
+Say: "Aasa says mobility confidence, not a diagnosis."
 
-| File | Role |
-|---|---|
-| `data/preferences/UserPreferences.kt` | App-private `SharedPreferences` store for `userName` + `lastGreetingAtMs`. Default name is `"friend"`; default cool-down is 5 min. |
-| `agent/GreetingBuilder.kt` | Pure, testable copy generator. `build(userName, hourOfDay, random)` → one human-sounding line. Copy banks have 3–6 variants per time-of-day so repeat opens don't feel canned. **Never names medical conditions** (rule §3). |
-| `ui/home/HomeViewModel.kt` | New `maybeGreetUser(force)` / `updateUserName(name)` methods. The TTS observer flips `autoListenAfterGreeting` so `TtsEvent.Done` chains into `startListening()` when mic permission is already granted. |
-| `ui/home/HomeScreen.kt` | New `UserNameCard` (edit name + "Replay greeting" button). `LaunchedEffect(Unit)` calls `maybeGreetUser()` after the mic permission probe so the post-greeting auto-listen decision is correct. |
-| `AndroidManifest.xml` | `MainActivity` now also handles `android.intent.action.ASSIST` and `android.intent.action.VOICE_COMMAND` so OS-level voice front-ends can launch it. |
-| `AasaApplication.kt` | Exposes `userPreferences: UserPreferences` for the Factory. |
+What to show:
 
-### Design properties worth knowing
+- Run or simulate a 10-second walk check.
+- Point out the score, stability label, and feature summary.
 
-- **No new permissions.** Reuses `RECORD_AUDIO` from Phase 6; no `WAKE_LOCK`, no `FOREGROUND_SERVICE`, no boot receiver.
-- **No new long-lived state.** Everything fits in `SharedPreferences` + an in-process bool. No Room table.
-- **Greetings are not stored as conversation turns.** They're spoken-only — they don't pollute `conversations`, don't show up in "Recent conversations", and don't go through `AgentOrchestrator`. This is intentional: a hello isn't a tool call.
-- **Cool-down is per-process AND per-preference.** `greetingSpoken` (in-process bool) prevents re-greet on config change. `shouldGreet(now)` prevents re-greet inside 5 min across navigations / app-switcher resumes.
-- **"Replay greeting" is a demo affordance.** Lets you verify the morning / afternoon / evening branches without restarting the app.
+### Daily Heartbeat and Neighbor Helper
 
-### What is *not* done in Phase 11
+Files: `PresencePingRepository`, `PresencePingEntity`, `WellnessCheckTool`, `NeighborCheckTool`, Home heartbeat UI.
 
-- True always-on `"Hey Aasa"` hotword (see rationale above).
-- Locale-aware greeting copy (only English banks exist). Phase 12 candidate.
-- Persisted "How are you feeling?" sentiment loop — the greeting question is open-ended but the model has no special memory of how the elder said they were doing on previous days.
-- Greeting in `MainActivity.onNewIntent` for the `ACTION_ASSIST` path specifically. Today the greeting fires whenever `HomeScreen`'s `LaunchedEffect(Unit)` runs, which covers the assistant deep-link path *and* the launcher icon path uniformly.
+Say: "Aasa watches for a daily heartbeat through app activity, conversation, speech, or check-in taps. If the morning window passes silently, it prepares a check-in message. Neighbor helper escalation is consent-gated."
 
----
+Important caveat:
 
-*Last updated: Phase 11 — personalized launch greeting + assist-app voice-launch entry point.*
+- `Mrs Wong` is seeded as a paired helper, but `NeighborCheckTool` only uses her when both `providerConsentGranted` and `recipientConsentGranted` are true.
 
----
+### Hey Aasa Hotword
 
-## 24. Phase 12 — Opt-in "Hey Aasa" wake word (hackathon-grade)
+Files: `HotwordService`, `UserPreferences.hotwordEnabled`, `HomeScreen.HotwordCard`.
 
-Phase 11 left the always-on wake word as future work because it conflicts with the "no background sensing" non-negotiable (§3). Phase 12 ships it **as an opt-in, gated behind both a build flag and an explicit user toggle**, so the safe default is unchanged.
+Say: "This is intentionally opt-in and visibly running. It is a foreground microphone service behind `-PaasaEnableHotword=true`, not a hidden always-on listener."
 
-### How to turn it on
+Build flag:
 
 ```bash
 cd Aasa
 ./gradlew :app:installDebug -PaasaEnableHotword=true
-# or: AASA_ENABLE_HOTWORD=true ./gradlew :app:installDebug
 ```
 
-Then on the device:
+## 11. Build and Run
 
-1. Launch Aasa. A new **"Hey Aasa wake word"** card appears on Home (only present in hotword-enabled builds).
-2. Flip the switch. Grant `RECORD_AUDIO` and (on Android 13+) `POST_NOTIFICATIONS`.
-3. A persistent **"Aasa is listening for 'Hey Aasa'"** notification appears.
-4. Say *"Hey Aasa"* (or *"OK Aasa"*, or just *"Aasa"*). `MainActivity` is launched, the Phase 11 greeting fires, and the mic opens for the elder's reply.
+### Android app
 
-To turn it off: flip the switch back, or tap **Stop** in the notification, or swipe the app away (the service calls `stopSelf()` from `onTaskRemoved`).
-
-### Architecture
-
-```
-              ┌────────────────────────────────────┐
-              │ HomeScreen "Hey Aasa wake word"    │
-              │ card  (only shown if hotword build)│
-              └──────────────┬─────────────────────┘
-                             │ toggle on
-                             ▼
-              ┌────────────────────────────────────┐
-              │ HomeViewModel.setHotwordEnabled()  │
-              │  - persists to UserPreferences     │
-              │  - HotwordService.start(context)   │
-              └──────────────┬─────────────────────┘
-                             ▼
-        ┌────────────────────────────────────────────────┐
-        │ HotwordService (FOREGROUND_SERVICE_MICROPHONE) │
-        │  - persistent notification (Stop action)       │
-        │  - SpeechRecognizer re-listen loop             │
-        │  - substring scan: "hey aasa" / "ok aasa" /    │
-        │    "okay aasa" / "aasa" / "hey asa"            │
-        └──────────────┬─────────────────────────────────┘
-                       │ wake phrase matched
-                       ▼
-        ┌────────────────────────────────────────────────┐
-        │ startActivity(MainActivity, FLAG_NEW_TASK)     │
-        │ → HomeScreen.LaunchedEffect(Unit)              │
-        │ → viewModel.maybeGreetUser()                   │
-        │ → TTS "Good morning, Naveen…"                  │
-        │ → on TtsEvent.Done → startListening()          │
-        └────────────────────────────────────────────────┘
+```bash
+cd Aasa
+./gradlew :app:assembleDebug
+./gradlew :app:installDebug
+adb shell am start -n com.aasa.eldercare/.MainActivity
 ```
 
-### Files
+### Optional Mac bridge
 
-| File | Role |
-|---|---|
-| `app/build.gradle.kts` | New `aasaEnableHotword` Gradle property → `BuildConfig.AASA_ENABLE_HOTWORD` (default `false`). |
-| `AndroidManifest.xml` | New `<uses-permission>` for `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`. New `<service>` entry `.voice.HotwordService` with `foregroundServiceType="microphone"`. |
-| `voice/HotwordService.kt` | The foreground service. Runs `SpeechRecognizer` in a re-listen loop, scans for `WAKE_PHRASES`, launches `MainActivity` on a match. Stops itself on `ACTION_STOP` or `onTaskRemoved`. |
-| `data/preferences/UserPreferences.kt` | New `hotwordEnabled: Boolean` flag so the elder's opt-in survives reboot / process death. |
-| `ui/home/HomeViewModel.kt` | `setHotwordEnabled(Boolean)` (persists + starts/stops service), `clearHotwordError()`, auto-restart on `setMicPermissionGranted(true)` when previously opted in. |
-| `ui/home/HomeUiState.kt` | New `hotwordSupported` / `hotwordEnabled` / `hotwordError` fields. |
-| `ui/home/HomeScreen.kt` | New `HotwordCard` (Switch + honest-trade-offs copy) + a permission launcher for `POST_NOTIFICATIONS` on Android 13+. |
+Use this only as a developer fallback or for long prompt demos:
 
-### Honest trade-offs (these matter)
+```bash
+cd aasa-gemma-server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+adb reverse tcp:8000 tcp:8000
+curl http://127.0.0.1:8000/health
+```
 
-This is **not** Google-Assistant-quality hotword detection. The implementation is built on Android's stock `SpeechRecognizer`, not a dedicated keyword-spotting model (Porcupine, Picovoice, custom TFLite KWS, etc.).
+To enable bridge fallback in the app build:
 
-Real limits that are documented in the UI:
+```bash
+cd Aasa
+./gradlew :app:installDebug -PaasaEnableGemmaBridge=true
+```
 
-- **Battery cost**: ~5–10 %/h while active. Mitigated only by the cool-down between recognitions.
-- **No Doze resilience**: after enough idle time the OS will throttle or pause the service. The elder is told to fall back to *"Hey Google, open Aasa"*.
-- **False positives**: substring `"aasa"` will trip on `"Asia"`, `"asa"`, etc. (Same trade-off pattern as `tools/SafetyKeywords.kt`, §8.) The trigger list is small on purpose so it can be reviewed line-by-line.
-- **No on-device keyword model**: there is no acoustic-only wake-word path; the full `SpeechRecognizer` is invoked. Some OEM implementations refuse to run from a background service — the service fails fast on those.
-- **Mandatory visible notification**: Android 14 FGS rules require the persistent notification. We treat that as a feature, not a bug: the elder always sees that the mic is hot.
+### On-device model side-load
 
-### What's still queued
+The `.litertlm` model is not bundled in the APK. Side-load it to:
 
-- **Real on-device KWS** (Porcupine / Picovoice / custom TFLite). Would dramatically lower battery cost and false-positive rate. Hard blocker: license and model availability for "Aasa" as a custom wake word.
-- **Wake-word event → conversation history**. Today the service launches the activity but doesn't record "user said wake word" anywhere; the Phase 11 greeting is the only signal.
-- **Per-time-of-day quiet hours** so the service auto-pauses at night.
+```text
+/sdcard/Android/data/com.aasa.eldercare/files/models/gemma-4-E2B-it.litertlm
+```
 
-### Updated non-negotiable
+Expected model: `gemma-4-E2B-it.litertlm` from `litert-community/gemma-4-E2B-it-litert-lm`.
 
-The "No background sensing" rule from §3 now reads more precisely:
+## 12. Permissions
 
-> *Background sensing is OFF by default. Any background-sensing capability must be (a) gated behind a build-time flag, (b) require an explicit opt-in toggle inside the app, AND (c) surface a persistent notification while running. Phase 12's `HotwordService` is the first feature to meet all three.*
+Required or feature-specific permissions:
+
+- `RECORD_AUDIO`: voice input, greeting reply, hotword service.
+- Health Connect read permissions for sleep, heart rate, and steps: Morning Briefing.
+- Camera/gallery access through Android pickers: Medicine Lens and Document Reader.
+- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`: hotword builds only.
+
+No `CALL_PHONE` permission is needed because calls use `ACTION_DIAL`.
+
+## 13. Dependency Stack
+
+- Android Gradle Plugin `8.2.2`
+- Kotlin `1.9.22`
+- Compose BOM `2024.02.02`
+- Material 3, Navigation Compose, Lifecycle ViewModel Compose
+- Coroutines `1.7.3`
+- Retrofit/Gson/OkHttp for the optional bridge
+- Room `2.6.1`
+- LiteRT-LM `com.google.ai.edge.litertlm:litertlm-android:0.11.0`
+- Health Connect `androidx.health.connect:connect-client:1.1.0-alpha07`
+- ML Kit Text Recognition for medicine/document OCR
+- No Hilt/Dagger/Koin; `AasaApplication` is the service locator.
+
+## 14. What Is Hackathon-Grade
+
+- Room uses destructive migration fallback.
+- Fall and mobility heuristics are demos, not validated medical systems.
+- Hotword uses Android `SpeechRecognizer`, not a low-power keyword spotting model.
+- The on-device model is side-loaded with `adb`, not downloaded in-app.
+- Prompt-engineered JSON is still used instead of native constrained tool calling.
+- Reminders are still a placeholder.
+- Automated tests are minimal/nonexistent.
+- The optional server still contains legacy in-memory medication POC code.
+- Neighbor helper consent state exists, but the full multi-party onboarding UX is not complete.
+
+## 15. Suggested 3-Minute Demo Script
+
+**0:00 - 0:20: Set the premise**  
+"This is Aasa, a local-first safety companion for an elder living alone. The big design principle is that AI can prepare help, but the elder confirms every real-world action."
+
+**0:20 - 0:45: Greeting and voice**  
+Open Home. Let Aasa greet by name. Say: "It speaks first, then can listen for the reply. The elder does not have to hunt for a chat box."
+
+**0:45 - 1:15: Grounded medication**  
+Tap `Medication`. Then ask `"Did I take my medicine today?"`  
+Say: "This answer comes from Room on the phone."
+
+**1:15 - 1:45: Safety card**  
+Tap `Safety`. Show alert card.  
+Say: "Medium risk prepares a trusted contact message, but nothing sends until the elder taps."
+
+**1:45 - 2:10: Scam shield**  
+Tap `Scam Alert`.  
+Say: "Aasa explains the warning signs without blaming the elder."
+
+**2:10 - 2:35: Lens or briefing**  
+Pick one depending on demo setup:
+
+- Medicine/document lens: show OCR result and safety receipt.
+- Morning briefing: show Health Connect/demo-data pill and summary.
+
+**2:35 - 3:00: Close with architecture**  
+Show model status/recent conversations.  
+Say: "Gemma decides the conversational shape, but local deterministic rules, local tools, and local confirmation make the safety behavior reliable."
+
+## 16. Phrases That Work Well
+
+```text
+I took my BP tablet.
+Did I take my medicine today?
+My granddaughter Ananya's birthday is May 12.
+Call Priya.
+I feel weak and missed my medicine.
+I cannot breathe.
+Analyze this suspicious message: Hi Grandma, I'm in trouble and need help now. Please don't call anyone. Buy two Apple gift cards worth $500 and send me the codes quickly.
+How did I sleep?
+Morning briefing.
+Run a mobility check.
+Fall detected. User response: I cannot get up.
+Daily heartbeat timeout: wellness check timeout.
+Daily heartbeat timeout: neighbor check escalation.
+```
+
+## 17. Glossary
+
+- **Action card:** A UI card that asks the elder to confirm a prepared call/SMS/safety action.
+- **AgentAction:** Parsed model action with `intent`, `riskLevel`, `tool`, `arguments`, and `assistantResponse`.
+- **Deferred confirmation:** Tools prepare actions; the elder executes or dismisses them.
+- **Deterministic override:** Local substring/rule scan that can reroute a model action before tool dispatch.
+- **GemmaRouter:** Chooses on-device Gemma or optional bridge.
+- **PendingAction:** HomeViewModel payload used to render action cards.
+- **ToolResult:** Tool execution output consumed by the ViewModel/UI.
+- **Safety receipt:** Medicine Lens explanation of what was seen, what matched, confidence, and next step.
 
 ---
 
-*Last updated: Phase 12 — opt-in "Hey Aasa" wake-word foreground service.*
+Last updated: current app state after Phase 12 plus Medicine/Document Lens, Daily Heartbeat, and Neighbor Helper.
