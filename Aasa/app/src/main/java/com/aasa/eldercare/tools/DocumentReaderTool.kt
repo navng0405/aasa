@@ -43,60 +43,113 @@ class DocumentReaderTool : AgentTool {
     }
 
     private fun buildTwoSentenceSummary(text: String): String {
-        val normalized = text.replace(Regex("\\s+"), " ").trim()
+        val lines = text.lineSequence()
+            .map { it.trim().replace(Regex("\\s+"), " ") }
+            .filter { it.length >= 3 }
+            .toList()
+        val normalized = lines.joinToString(" ")
         val lower = normalized.lowercase()
-        val kind = detectKind(lower)
-        val amount = MONEY_REGEX.find(normalized)?.value
-        val dueDate = DATE_REGEX.find(normalized)?.value
-        val reference = REFERENCE_REGEX.find(normalized)?.value
-        val actionPhrase = detectActionPhrase(lower)
-        val entity = detectEntity(normalized)
 
-        val first = buildString {
-            append("This appears to be ")
-            append(kind)
-            entity?.let { append(" from ").append(it) }
-            amount?.let { append(" with an amount of ").append(it) }
-            dueDate?.let { append(" and a date ").append(dueDate) }
+        val highlights = extractHighlights(lines)
+        val keyValues = extractKeyValues(lines, normalized)
+        val action = detectActionInstruction(lines, lower)
+
+        val firstSentence = buildString {
+            val headline = highlights.take(2).joinToString("; ")
+                .ifBlank { lines.take(2).joinToString("; ") }
+                .take(180)
+            append("I read this document as: ")
+            append(headline.ifBlank { "text is partially visible" })
+            if (keyValues.isNotEmpty()) {
+                append(". Key details found: ")
+                append(keyValues.take(4).joinToString(", "))
+            }
             append(".")
         }
 
-        val second = buildString {
-            append("It asks you to ")
-            append(actionPhrase)
-            reference?.let { append(" using reference ").append(it) }
+        val secondSentence = buildString {
+            append("It is asking you to ")
+            append(action)
+            extractDeadlineOrDate(normalized)?.let { append(" by ").append(it) }
+            extractAmount(normalized)?.let { append(" and review amount ").append(it) }
+            extractReference(normalized)?.let { append(" (reference ").append(it).append(")") }
             append(".")
         }
-        return "$first $second"
+
+        return "$firstSentence $secondSentence"
     }
 
-    private fun detectKind(lower: String): String = when {
-        anyContains(lower, "invoice", "tax invoice", "amount due", "total due", "bill") ->
-            "a billing notice"
-        anyContains(lower, "application form", "apply", "scheme", "eligibility", "benefit") ->
-            "an application form"
-        anyContains(lower, "hospital", "clinic", "medical", "medicare", "statement") ->
-            "a medical statement"
-        anyContains(lower, "final warning", "urgent", "suspended", "legal action") ->
-            "an urgent warning letter"
-        else -> "a document notice"
+    private fun extractHighlights(lines: List<String>): List<String> =
+        lines
+            .sortedByDescending { scoreLine(it) }
+            .take(3)
+
+    private fun scoreLine(line: String): Int {
+        val lower = line.lowercase()
+        var score = 0
+        if (line.any { it.isDigit() }) score += 2
+        if (line.contains(":")) score += 2
+        if (KEY_LINE_HINTS.any { lower.contains(it) }) score += 4
+        return score
     }
 
-    private fun detectActionPhrase(lower: String): String = when {
-        anyContains(lower, "pay by", "due date", "amount due", "total due") ->
-            "review the charges and pay through the official channel"
-        anyContains(lower, "submit", "application", "documents required", "attach") ->
-            "fill and submit the requested form details"
-        anyContains(lower, "verify account", "click link", "otp", "verification code") ->
-            "verify the sender first and avoid sharing codes or clicking unknown links"
-        else ->
-            "review the key instruction and confirm with a trusted helper before acting"
+    private fun extractKeyValues(lines: List<String>, normalized: String): List<String> {
+        val extracted = mutableListOf<String>()
+        lines.forEach { line ->
+            val lower = line.lowercase()
+            if (KEY_VALUE_HINTS.none { lower.contains(it) }) return@forEach
+            val parts = line.split(":", limit = 2)
+            if (parts.size == 2 && parts[1].isNotBlank()) {
+                val key = parts[0].trim().take(24)
+                val value = parts[1].trim().take(48)
+                extracted += "$key=$value"
+            } else {
+                extracted += line.take(64)
+            }
+        }
+        extractAmount(normalized)?.let { extracted += "amount=$it" }
+        extractDeadlineOrDate(normalized)?.let { extracted += "date=$it" }
+        extractReference(normalized)?.let { extracted += "ref=$it" }
+        return extracted.distinct()
     }
 
-    private fun detectEntity(text: String): String? =
-        ENTITY_REGEX.find(text)?.groupValues?.getOrNull(1)?.trim()
-            ?.takeIf { it.length >= 3 }
-            ?.take(48)
+    private fun detectActionInstruction(lines: List<String>, lower: String): String {
+        val imperativeLine = lines.firstOrNull { line ->
+            val l = line.lowercase()
+            l.startsWith("please ") ||
+                l.contains("you must") ||
+                l.contains("required to") ||
+                l.contains("submit") ||
+                l.contains("pay") ||
+                l.contains("verify")
+        }?.take(120)
+
+        if (!imperativeLine.isNullOrBlank()) {
+            return imperativeLine.lowercase().removeSuffix(".")
+        }
+        return when {
+            anyContains(lower, "pay by", "amount due", "total due", "outstanding") ->
+                "check this bill and pay through the official channel"
+            anyContains(lower, "submit", "application", "documents required") ->
+                "complete and submit the requested form details"
+            anyContains(lower, "verify", "otp", "verification code", "click link") ->
+                "verify the sender first and avoid sharing codes"
+            else ->
+                "review the visible instructions and confirm with a trusted helper before acting"
+        }
+    }
+
+    private fun extractAmount(text: String): String? =
+        MONEY_REGEX.find(text)?.value
+
+    private fun extractDeadlineOrDate(text: String): String? =
+        DUE_DATE_REGEX.find(text)?.groupValues?.getOrNull(1)
+            ?.takeIf { it.isNotBlank() }
+            ?: DATE_REGEX.find(text)?.value
+
+    private fun extractReference(text: String): String? =
+        REFERENCE_REGEX.find(text)?.groupValues?.getOrNull(1)
+            ?.takeIf { it.isNotBlank() }
 
     private fun anyContains(haystack: String, vararg needles: String): Boolean =
         needles.any { haystack.contains(it) }
@@ -110,6 +163,10 @@ class DocumentReaderTool : AgentTool {
 
     companion object {
         private val MONEY_REGEX = Regex("""(?:₹|\$|USD|INR)\s?\d[\d,]*(?:\.\d{1,2})?""", RegexOption.IGNORE_CASE)
+        private val DUE_DATE_REGEX = Regex(
+            """(?:due(?:\s+date)?|pay\s+by|before)\s*[:\-]?\s*([A-Za-z0-9,/\-\s]{4,24})""",
+            RegexOption.IGNORE_CASE
+        )
         private val DATE_REGEX = Regex(
             """\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{2,4})\b""",
             RegexOption.IGNORE_CASE
@@ -118,9 +175,14 @@ class DocumentReaderTool : AgentTool {
             """\b(?:ref(?:erence)?|invoice|account|application|claim)\s*(?:no|number|#|id)?[:\-\s]*([A-Z0-9\-]{4,})\b""",
             RegexOption.IGNORE_CASE
         )
-        private val ENTITY_REGEX = Regex(
-            """(?:from|issuer|hospital|clinic|department|ministry|bank)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]{3,})""",
-            RegexOption.IGNORE_CASE
+        private val KEY_LINE_HINTS = listOf(
+            "invoice", "bill", "statement", "account", "reference", "claim",
+            "due", "amount", "total", "patient", "name", "hospital", "scheme",
+            "application", "deadline", "submit", "verify", "urgent"
+        )
+        private val KEY_VALUE_HINTS = listOf(
+            "invoice", "account", "reference", "ref", "claim", "patient", "name",
+            "amount", "total", "due", "date", "deadline", "scheme", "application"
         )
     }
 }
