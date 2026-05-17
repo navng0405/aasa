@@ -47,35 +47,32 @@ class DocumentReaderTool : AgentTool {
             .map { it.trim().replace(Regex("\\s+"), " ") }
             .filter { it.length >= 3 }
             .toList()
+        if (lines.isEmpty()) {
+            return "I could not read clear text from this photo. Please retake the photo with better light and keep the full page visible."
+        }
         val normalized = lines.joinToString(" ")
-        val lower = normalized.lowercase()
-
         val highlights = extractHighlights(lines)
-        val keyValues = extractKeyValues(lines, normalized)
-        val action = detectActionInstruction(lines, lower)
+        val facts = extractFacts(lines, normalized)
 
         val firstSentence = buildString {
-            val headline = highlights.take(2).joinToString("; ")
-                .ifBlank { lines.take(2).joinToString("; ") }
-                .take(180)
-            append("I read this document as: ")
-            append(headline.ifBlank { "text is partially visible" })
-            if (keyValues.isNotEmpty()) {
-                append(". Key details found: ")
-                append(keyValues.take(4).joinToString(", "))
-            }
+            append("Visible text: ")
+            append(
+                highlights.take(3)
+                    .joinToString(" | ")
+                    .ifBlank { lines.take(2).joinToString(" | ") }
+                    .take(220)
+            )
             append(".")
         }
-
         val secondSentence = buildString {
-            append("It is asking you to ")
-            append(action)
-            extractDeadlineOrDate(normalized)?.let { append(" by ").append(it) }
-            extractAmount(normalized)?.let { append(" and review amount ").append(it) }
-            extractReference(normalized)?.let { append(" (reference ").append(it).append(")") }
+            append("Extracted details: ")
+            append(
+                facts.take(6).joinToString(", ").ifBlank {
+                    "no clear amount, date, reference, or named field was confidently found"
+                }.take(240)
+            )
             append(".")
         }
-
         return "$firstSentence $secondSentence"
     }
 
@@ -93,7 +90,7 @@ class DocumentReaderTool : AgentTool {
         return score
     }
 
-    private fun extractKeyValues(lines: List<String>, normalized: String): List<String> {
+    private fun extractFacts(lines: List<String>, normalized: String): List<String> {
         val extracted = mutableListOf<String>()
         lines.forEach { line ->
             val lower = line.lowercase()
@@ -113,32 +110,6 @@ class DocumentReaderTool : AgentTool {
         return extracted.distinct()
     }
 
-    private fun detectActionInstruction(lines: List<String>, lower: String): String {
-        val imperativeLine = lines.firstOrNull { line ->
-            val l = line.lowercase()
-            l.startsWith("please ") ||
-                l.contains("you must") ||
-                l.contains("required to") ||
-                l.contains("submit") ||
-                l.contains("pay") ||
-                l.contains("verify")
-        }?.take(120)
-
-        if (!imperativeLine.isNullOrBlank()) {
-            return imperativeLine.lowercase().removeSuffix(".")
-        }
-        return when {
-            anyContains(lower, "pay by", "amount due", "total due", "outstanding") ->
-                "check this bill and pay through the official channel"
-            anyContains(lower, "submit", "application", "documents required") ->
-                "complete and submit the requested form details"
-            anyContains(lower, "verify", "otp", "verification code", "click link") ->
-                "verify the sender first and avoid sharing codes"
-            else ->
-                "review the visible instructions and confirm with a trusted helper before acting"
-        }
-    }
-
     private fun extractAmount(text: String): String? =
         MONEY_REGEX.find(text)?.value
 
@@ -150,9 +121,6 @@ class DocumentReaderTool : AgentTool {
     private fun extractReference(text: String): String? =
         REFERENCE_REGEX.find(text)?.groupValues?.getOrNull(1)
             ?.takeIf { it.isNotBlank() }
-
-    private fun anyContains(haystack: String, vararg needles: String): Boolean =
-        needles.any { haystack.contains(it) }
 
     private fun riskBand(lower: String): String = when {
         lower.contains("gift card") || lower.contains("wire transfer") ||
