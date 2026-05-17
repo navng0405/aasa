@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.data.entity.TrustedContactEntity
+import com.aasa.eldercare.data.entity.TrustedRelationshipTypes
 import com.aasa.eldercare.ui.IntentActionLauncher
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +94,8 @@ fun TrustedCircleScreen(
                     body = buildDemoAlertMessage(contact)
                 )
             },
+            onSetProviderConsent = viewModel::onSetProviderConsent,
+            onSetRecipientConsent = viewModel::onSetRecipientConsent,
             onDismissError = viewModel::clearError
         )
     }
@@ -114,6 +117,8 @@ private fun TrustedCircleContent(
     onRefresh: () -> Unit,
     onPrepareCall: (TrustedContactEntity) -> Unit,
     onPrepareAlert: (TrustedContactEntity) -> Unit,
+    onSetProviderConsent: (TrustedContactEntity, Boolean) -> Unit,
+    onSetRecipientConsent: (TrustedContactEntity, Boolean) -> Unit,
     onDismissError: () -> Unit
 ) {
     Column(
@@ -150,7 +155,9 @@ private fun TrustedCircleContent(
             else -> ContactList(
                 contacts = uiState.contacts,
                 onPrepareCall = onPrepareCall,
-                onPrepareAlert = onPrepareAlert
+                onPrepareAlert = onPrepareAlert,
+                onSetProviderConsent = onSetProviderConsent,
+                onSetRecipientConsent = onSetRecipientConsent
             )
         }
     }
@@ -160,7 +167,9 @@ private fun TrustedCircleContent(
 private fun ContactList(
     contacts: List<TrustedContactEntity>,
     onPrepareCall: (TrustedContactEntity) -> Unit,
-    onPrepareAlert: (TrustedContactEntity) -> Unit
+    onPrepareAlert: (TrustedContactEntity) -> Unit,
+    onSetProviderConsent: (TrustedContactEntity, Boolean) -> Unit,
+    onSetRecipientConsent: (TrustedContactEntity, Boolean) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -170,7 +179,9 @@ private fun ContactList(
             ContactCard(
                 contact = contact,
                 onPrepareCall = { onPrepareCall(contact) },
-                onPrepareAlert = { onPrepareAlert(contact) }
+                onPrepareAlert = { onPrepareAlert(contact) },
+                onSetProviderConsent = { onSetProviderConsent(contact, it) },
+                onSetRecipientConsent = { onSetRecipientConsent(contact, it) }
             )
         }
     }
@@ -180,7 +191,9 @@ private fun ContactList(
 private fun ContactCard(
     contact: TrustedContactEntity,
     onPrepareCall: () -> Unit,
-    onPrepareAlert: () -> Unit
+    onPrepareAlert: () -> Unit,
+    onSetProviderConsent: (Boolean) -> Unit,
+    onSetRecipientConsent: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -219,6 +232,16 @@ private fun ContactCard(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
+            if (contact.relationshipType == TrustedRelationshipTypes.CARE_PROVIDER &&
+                contact.pairedContactId != null
+            ) {
+                ConsentSection(
+                    providerGranted = contact.providerConsentGranted,
+                    recipientGranted = contact.recipientConsentGranted,
+                    onSetProviderConsent = onSetProviderConsent,
+                    onSetRecipientConsent = onSetRecipientConsent
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -238,6 +261,67 @@ private fun ContactCard(
                     Text(text = "Prepare Alert")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ConsentSection(
+    providerGranted: Boolean,
+    recipientGranted: Boolean,
+    onSetProviderConsent: (Boolean) -> Unit,
+    onSetRecipientConsent: (Boolean) -> Unit
+) {
+    val fullyGranted = providerGranted && recipientGranted
+    val badgeText = if (fullyGranted) {
+        "Pair consent: active"
+    } else {
+        "Pair consent: pending"
+    }
+    val badgeColor = if (fullyGranted) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.tertiary
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(badgeColor)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = badgeText,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onPrimary
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        OutlinedButton(
+            onClick = { onSetProviderConsent(!providerGranted) },
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = if (providerGranted) {
+                    "Undo helper consent"
+                } else {
+                    "Confirm helper consent"
+                }
+            )
+        }
+        OutlinedButton(
+            onClick = { onSetRecipientConsent(!recipientGranted) },
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = if (recipientGranted) {
+                    "Undo recipient consent"
+                } else {
+                    "Confirm recipient consent"
+                }
+            )
         }
     }
 }

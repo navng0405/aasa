@@ -25,7 +25,7 @@ import com.aasa.eldercare.data.entity.TrustedContactEntity
         ConversationEntity::class,
         PresencePingEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

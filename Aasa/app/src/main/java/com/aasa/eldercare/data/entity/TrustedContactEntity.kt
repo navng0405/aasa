@@ -22,6 +22,8 @@ data class TrustedContactEntity(
     val isPrimary: Boolean = false,
     val relationshipType: String = TrustedRelationshipTypes.CARE_RECIPIENT,
     val pairedContactId: Long? = null,
+    val providerConsentGranted: Boolean = false,
+    val recipientConsentGranted: Boolean = false,
     @ColumnInfo(name = "nameLower") val nameLower: String = name.lowercase()
 )
 

@@ -16,11 +16,27 @@ class TrustedContactRepository(
 
     suspend fun findPrimaryContact(): TrustedContactEntity? = dao.findPrimaryContact()
 
-    suspend fun findPairedCareProviderFor(contactId: Long): TrustedContactEntity? =
-        dao.findPairedContact(
+    suspend fun findPairedCareProviderFor(contactId: Long): TrustedContactEntity? {
+        val contact = dao.findPairedContact(
             pairedContactId = contactId,
             relationshipType = TrustedRelationshipTypes.CARE_PROVIDER
         )
+        return contact?.takeIf {
+            it.providerConsentGranted && it.recipientConsentGranted
+        }
+    }
+
+    suspend fun setProviderConsent(contactId: Long, granted: Boolean): Boolean {
+        val current = dao.findById(contactId) ?: return false
+        dao.insertContact(current.copy(providerConsentGranted = granted))
+        return true
+    }
+
+    suspend fun setRecipientConsent(contactId: Long, granted: Boolean): Boolean {
+        val current = dao.findById(contactId) ?: return false
+        dao.insertContact(current.copy(recipientConsentGranted = granted))
+        return true
+    }
 
     suspend fun upsert(contact: TrustedContactEntity): Long = dao.insertContact(contact)
 

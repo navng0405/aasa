@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
  * Phase 5 stops at preparing — no dialer, no SMS, no permissions.
  */
 class TrustedCircleViewModel(
-    contactRepository: TrustedContactRepository
+    private val contactRepository: TrustedContactRepository
 ) : ViewModel() {
 
     private val isRefreshing = MutableStateFlow(false)
@@ -75,6 +75,36 @@ class TrustedCircleViewModel(
 
     fun onPrepareAlert(contact: TrustedContactEntity) {
         publishPreparedMessage("Alert prepared for ${contact.name}.")
+    }
+
+    fun onSetProviderConsent(contact: TrustedContactEntity, granted: Boolean) {
+        viewModelScope.launch {
+            val ok = contactRepository.setProviderConsent(contact.id, granted)
+            if (ok) {
+                publishPreparedMessage(
+                    if (granted) {
+                        "Helper consent saved for ${contact.name}."
+                    } else {
+                        "Helper consent removed for ${contact.name}."
+                    }
+                )
+            }
+        }
+    }
+
+    fun onSetRecipientConsent(contact: TrustedContactEntity, granted: Boolean) {
+        viewModelScope.launch {
+            val ok = contactRepository.setRecipientConsent(contact.id, granted)
+            if (ok) {
+                publishPreparedMessage(
+                    if (granted) {
+                        "Recipient consent saved for ${contact.name}."
+                    } else {
+                        "Recipient consent removed for ${contact.name}."
+                    }
+                )
+            }
+        }
     }
 
     fun clearPreparedMessage() {

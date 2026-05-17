@@ -31,4 +31,7 @@ interface TrustedContactDao {
         pairedContactId: Long,
         relationshipType: String
     ): TrustedContactEntity?
+
+    @Query("SELECT * FROM trusted_contacts WHERE id = :id LIMIT 1")
+    suspend fun findById(id: Long): TrustedContactEntity?
 }
