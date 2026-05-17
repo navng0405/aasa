@@ -60,8 +60,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
 import com.aasa.eldercare.agent.AgentAction
 import com.aasa.eldercare.data.entity.ConversationEntity
-import com.aasa.eldercare.medicine.MedicineLensConfidence
-import com.aasa.eldercare.medicine.MedicineLensResult
 import com.aasa.eldercare.ui.IntentActionLauncher
 import com.aasa.eldercare.voice.HotwordService
 import com.google.gson.GsonBuilder
@@ -239,16 +237,10 @@ fun HomeScreen(
                 isAnalyzing = uiState.isMedicineLensAnalyzing,
                 result = uiState.medicineLensResult,
                 error = uiState.medicineLensError,
-                careContactName = uiState.medicineLensCareContactName,
-                careContactPhone = uiState.medicineLensCareContactPhone,
-                careBrief = uiState.medicineLensCareBrief,
                 onTakePhoto = {
                     val uri = createMedicineLensPhotoUri(context)
                     medicinePhotoUri = uri
                     medicinePhotoLauncher.launch(uri)
-                },
-                onTellCareContact = { number, body ->
-                    IntentActionLauncher.openSms(context, number, body)
                 },
                 onClear = viewModel::clearMedicineLens
             )
@@ -829,13 +821,9 @@ private fun DailyHeartbeatSection(
 @Composable
 private fun MedicineLensSection(
     isAnalyzing: Boolean,
-    result: MedicineLensResult?,
+    result: DocumentReadingCardData?,
     error: String?,
-    careContactName: String?,
-    careContactPhone: String?,
-    careBrief: String?,
     onTakePhoto: () -> Unit,
-    onTellCareContact: (String, String) -> Unit,
     onClear: () -> Unit
 ) {
     Card(
@@ -856,13 +844,13 @@ private fun MedicineLensSection(
                 Text(text = "\uD83D\uDCF7", fontSize = 42.sp)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Medicine Lens",
+                        text = "Read this for me",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "Photograph a tablet strip or prescription label.",
+                        text = "Point at a form, bill, letter, or notice. Aasa explains it privately on-device.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -895,7 +883,7 @@ private fun MedicineLensSection(
                         strokeWidth = 2.dp
                     )
                     Text(
-                        text = "Reading the label on-device...",
+                        text = "Reading this document on-device...",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -903,14 +891,7 @@ private fun MedicineLensSection(
             }
 
             result?.let { lens ->
-                MedicineLensResultCard(
-                    result = lens,
-                    careContactName = careContactName,
-                    careContactPhone = careContactPhone,
-                    careBrief = careBrief,
-                    onTellCareContact = onTellCareContact,
-                    onClear = onClear
-                )
+                DocumentReaderResultCard(result = lens, onClear = onClear)
             }
 
             error?.let { message ->
@@ -921,18 +902,10 @@ private fun MedicineLensSection(
 }
 
 @Composable
-private fun MedicineLensResultCard(
-    result: MedicineLensResult,
-    careContactName: String?,
-    careContactPhone: String?,
-    careBrief: String?,
-    onTellCareContact: (String, String) -> Unit,
+private fun DocumentReaderResultCard(
+    result: DocumentReadingCardData,
     onClear: () -> Unit
 ) {
-    val confidenceLabel = when (result.confidence) {
-        MedicineLensConfidence.MEDIUM -> "Possible match"
-        MedicineLensConfidence.LOW -> "Needs confirmation"
-    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -944,46 +917,42 @@ private fun MedicineLensResultCard(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = confidenceLabel,
+                text = "Document risk: ${result.risk}",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold
             )
-            result.recognizedName?.let { name ->
-                Text(
-                    text = result.strength?.let { "$name · $it" } ?: name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
+            Text(
+                text = "2-sentence summary",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
             Text(
                 text = result.summary,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = result.safetyNote,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "What this is asking you to do",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
             )
-            SafetyReceiptCard(items = result.safetyReceipt)
-            if (!careContactPhone.isNullOrBlank() && !careBrief.isNullOrBlank()) {
-                Button(
-                    onClick = { onTellCareContact(careContactPhone, careBrief) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                ) {
-                    Text(text = "\uD83D\uDCAC", fontSize = 22.sp)
-                    Text(text = "  ")
-                    Text(
-                        text = "Tell ${careContactName ?: "my trusted contact"}",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+            Text(text = result.requestedAction, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = "What I'd worry about here",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(text = result.worries, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = "What you can ignore",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(text = result.ignore, style = MaterialTheme.typography.bodyLarge)
+            if (result.extractedTextPreview.isNotBlank()) {
                 Text(
-                    text = "Aasa will prepare a message. You choose whether to send it.",
+                    text = "Seen text preview: ${result.extractedTextPreview}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -993,49 +962,6 @@ private fun MedicineLensResultCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(text = "Clear")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SafetyReceiptCard(items: List<com.aasa.eldercare.medicine.SafetyReceiptItem>) {
-    if (items.isEmpty()) return
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(text = "\u2705", fontSize = 22.sp)
-                Text(
-                    text = "Safety receipt",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-            items.forEach { item ->
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = item.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    Text(
-                        text = item.value,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
             }
         }
     }
@@ -1614,6 +1540,7 @@ private fun humanizeTool(rawTool: String?): String {
         "FALLTRIAGE", "FALLTRIAGETOOL" -> "FallTriageTool"
         "MOBILITYSHIELD", "MOBILITYSHIELDTOOL" -> "MobilityShieldTool"
         "WELLNESSCHECK", "WELLNESSCHECKTOOL" -> "WellnessCheckTool"
+        "DOCUMENTREADER", "DOCUMENTREADERTOOL" -> "DocumentReaderTool"
         else -> cleaned
     }
 }

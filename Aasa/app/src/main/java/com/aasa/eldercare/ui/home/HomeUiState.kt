@@ -1,7 +1,6 @@
 package com.aasa.eldercare.ui.home
 
 import com.aasa.eldercare.agent.AgentAction
-import com.aasa.eldercare.medicine.MedicineLensResult
 import com.aasa.eldercare.tools.ToolActionTypes
 
 /**
@@ -38,11 +37,8 @@ data class HomeUiState(
 
     /** Medicine Lens: camera OCR result for prescription labels / tablet strips. */
     val isMedicineLensAnalyzing: Boolean = false,
-    val medicineLensResult: MedicineLensResult? = null,
+    val medicineLensResult: DocumentReadingCardData? = null,
     val medicineLensError: String? = null,
-    val medicineLensCareContactName: String? = null,
-    val medicineLensCareContactPhone: String? = null,
-    val medicineLensCareBrief: String? = null,
 
     /** Phase 7 deferred-confirmation action payload. */
     val pendingActionType: String? = null,
@@ -119,6 +115,15 @@ data class HomeUiState(
     val riskCopy: RiskCopy?
         get() = agentAction?.riskLevel?.let { RiskCopy.fromRaw(it) }
 }
+
+data class DocumentReadingCardData(
+    val summary: String,
+    val requestedAction: String,
+    val worries: String,
+    val ignore: String,
+    val risk: String,
+    val extractedTextPreview: String
+)
 
 /**
  * Coarse local view of the Gemma 4 bridge health. Driven by periodic

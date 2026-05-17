@@ -15,7 +15,7 @@ import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.PresencePingRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
-import com.aasa.eldercare.medicine.MedicineLensAnalyzer
+import com.aasa.eldercare.document.DocumentReaderAnalyzer
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
@@ -84,8 +84,8 @@ class HomeViewModel(
      */
     private var greetingSpoken: Boolean = false
     private var autoListenAfterGreeting: Boolean = false
-    private val medicineLensAnalyzer: MedicineLensAnalyzer by lazy {
-        MedicineLensAnalyzer(appContext, medicationRepository)
+    private val documentReaderAnalyzer: DocumentReaderAnalyzer by lazy {
+        DocumentReaderAnalyzer(appContext)
     }
 
     /** Live feed of recent conversation rows; survives process death. */
@@ -478,26 +478,31 @@ class HomeViewModel(
             _uiState.value = _uiState.value.copy(
                 isMedicineLensAnalyzing = true,
                 medicineLensError = null,
-                medicineLensResult = null,
-                medicineLensCareContactName = null,
-                medicineLensCareContactPhone = null,
-                medicineLensCareBrief = null
+                medicineLensResult = null
             )
-            runCatching { medicineLensAnalyzer.analyze(uri) }
+            runCatching { documentReaderAnalyzer.analyze(uri) }
                 .onSuccess { result ->
-                    val contact = runCatching { trustedContactRepository.findPrimaryContact() }
-                        .getOrNull()
-                    val brief = contact?.let { buildMedicineCareBrief(result.summary) }
+                    val cardData = DocumentReadingCardData(
+                        summary = (result.data[ToolResultKeys.DOCUMENT_SUMMARY] as? String)
+                            ?: "I couldn't summarize this page.",
+                        requestedAction = (result.data[ToolResultKeys.DOCUMENT_REQUESTED_ACTION] as? String)
+                            ?: "Please review the instructions carefully.",
+                        worries = (result.data[ToolResultKeys.DOCUMENT_WORRIES] as? String)
+                            ?: "No specific warning signs detected.",
+                        ignore = (result.data[ToolResultKeys.DOCUMENT_IGNORE] as? String)
+                            ?: "Ignore repeated formatting details.",
+                        risk = (result.data[ToolResultKeys.DOCUMENT_RISK] as? String) ?: "LOW",
+                        extractedTextPreview = (result.data[ToolResultKeys.DOCUMENT_TEXT] as? String)
+                            .orEmpty()
+                            .take(300)
+                    )
                     _uiState.value = _uiState.value.copy(
                         isMedicineLensAnalyzing = false,
-                        medicineLensResult = result,
-                        medicineLensError = null,
-                        medicineLensCareContactName = contact?.name,
-                        medicineLensCareContactPhone = contact?.phoneNumber,
-                        medicineLensCareBrief = brief
+                        medicineLensResult = cardData,
+                        medicineLensError = null
                     )
-                    if (result.summary.isNotBlank()) {
-                        textToSpeechManager.speak(result.summary)
+                    if (result.message.isNotBlank()) {
+                        textToSpeechManager.speak(result.message)
                     }
                 }
                 .onFailure { error ->
@@ -513,22 +518,16 @@ class HomeViewModel(
 
     fun onMedicinePhotoNotCaptured() {
         _uiState.value = _uiState.value.copy(
-            medicineLensError = "No photo was captured. Please try again with the medicine label in good light."
+            medicineLensError = "No photo was captured. Please try again with the document flat and in good light."
         )
     }
 
     fun clearMedicineLens() {
         _uiState.value = _uiState.value.copy(
             medicineLensResult = null,
-            medicineLensError = null,
-            medicineLensCareContactName = null,
-            medicineLensCareContactPhone = null,
-            medicineLensCareBrief = null
+            medicineLensError = null
         )
     }
-
-    private fun buildMedicineCareBrief(summary: String): String =
-        "Hi, Aasa helped me check a medicine label. $summary"
 
     /**
      * Public hook for callers (Compose-side launchers, tests) that
