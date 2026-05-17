@@ -235,8 +235,10 @@ fun HomeScreen(
 
             MedicineLensSection(
                 isAnalyzing = uiState.isMedicineLensAnalyzing,
+                selectedMode = uiState.selectedLensMode,
                 result = uiState.medicineLensResult,
                 error = uiState.medicineLensError,
+                onModeChange = viewModel::setLensMode,
                 onTakePhoto = {
                     val uri = createMedicineLensPhotoUri(context)
                     medicinePhotoUri = uri
@@ -821,8 +823,10 @@ private fun DailyHeartbeatSection(
 @Composable
 private fun MedicineLensSection(
     isAnalyzing: Boolean,
-    result: DocumentReadingCardData?,
+    selectedMode: LensMode,
+    result: LensCardData?,
     error: String?,
+    onModeChange: (LensMode) -> Unit,
     onTakePhoto: () -> Unit,
     onClear: () -> Unit
 ) {
@@ -844,16 +848,38 @@ private fun MedicineLensSection(
                 Text(text = "\uD83D\uDCF7", fontSize = 42.sp)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Read this for me",
+                        text = "Lens Reader",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "Point at a form, bill, letter, or notice. Aasa explains it privately on-device.",
+                        text = if (selectedMode == LensMode.MEDICINE) {
+                            "Point at a medicine strip or prescription label."
+                        } else {
+                            "Point at a form, bill, letter, or notice."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onModeChange(LensMode.MEDICINE) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Medicine label")
+                }
+                OutlinedButton(
+                    onClick = { onModeChange(LensMode.DOCUMENT) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Form / letter")
                 }
             }
 
@@ -867,7 +893,11 @@ private fun MedicineLensSection(
                 Text(text = "\uD83D\uDCF8", fontSize = 26.sp)
                 Text(text = "  ")
                 Text(
-                    text = if (isAnalyzing) "Reading photo..." else "Take Photo",
+                    text = if (isAnalyzing) {
+                        if (selectedMode == LensMode.MEDICINE) "Reading medicine..." else "Reading photo..."
+                    } else {
+                        "Take Photo"
+                    },
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -883,19 +913,70 @@ private fun MedicineLensSection(
                         strokeWidth = 2.dp
                     )
                     Text(
-                        text = "Reading this document on-device...",
+                        text = if (selectedMode == LensMode.MEDICINE) {
+                            "Reading this medicine label on-device..."
+                        } else {
+                            "Reading this document on-device..."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
 
-            result?.let { lens ->
-                DocumentReaderResultCard(result = lens, onClear = onClear)
+            when (result) {
+                is LensCardData.Document -> {
+                    DocumentReaderResultCard(result = result.result, onClear = onClear)
+                }
+                is LensCardData.Medicine -> {
+                    MedicineLensResultCard(result = result.result, onClear = onClear)
+                }
+                null -> Unit
             }
 
             error?.let { message ->
                 MedicineLensErrorCard(message = message, onDismiss = onClear)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MedicineLensResultCard(
+    result: com.aasa.eldercare.medicine.MedicineLensResult,
+    onClear: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Medicine summary",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            result.recognizedName?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = result.summary,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = result.safetyNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) {
+                Text("Clear")
             }
         }
     }
@@ -932,31 +1013,6 @@ private fun DocumentReaderResultCard(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Text(
-                text = "What this is asking you to do",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(text = result.requestedAction, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = "What I'd worry about here",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(text = result.worries, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = "What you can ignore",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(text = result.ignore, style = MaterialTheme.typography.bodyLarge)
-            if (result.extractedTextPreview.isNotBlank()) {
-                Text(
-                    text = "Seen text preview: ${result.extractedTextPreview}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
             OutlinedButton(
                 onClick = onClear,
                 modifier = Modifier.fillMaxWidth()

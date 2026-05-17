@@ -16,6 +16,7 @@ import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.PresencePingRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
 import com.aasa.eldercare.document.DocumentReaderAnalyzer
+import com.aasa.eldercare.medicine.MedicineLensAnalyzer
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
@@ -84,6 +85,9 @@ class HomeViewModel(
      */
     private var greetingSpoken: Boolean = false
     private var autoListenAfterGreeting: Boolean = false
+    private val medicineLensAnalyzer: MedicineLensAnalyzer by lazy {
+        MedicineLensAnalyzer(appContext, medicationRepository)
+    }
     private val documentReaderAnalyzer: DocumentReaderAnalyzer by lazy {
         DocumentReaderAnalyzer(appContext)
     }
@@ -472,53 +476,85 @@ class HomeViewModel(
         _uiState.value = _uiState.value.copy(voiceError = null)
     }
 
+    fun setLensMode(mode: LensMode) {
+        if (_uiState.value.selectedLensMode == mode) return
+        _uiState.value = _uiState.value.copy(
+            selectedLensMode = mode,
+            medicineLensResult = null,
+            medicineLensError = null
+        )
+    }
+
     fun analyzeMedicinePhoto(uri: Uri) {
         if (_uiState.value.isMedicineLensAnalyzing) return
+        val mode = _uiState.value.selectedLensMode
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isMedicineLensAnalyzing = true,
                 medicineLensError = null,
                 medicineLensResult = null
             )
-            runCatching { documentReaderAnalyzer.analyze(uri) }
-                .onSuccess { result ->
-                    val cardData = DocumentReadingCardData(
-                        summary = (result.data[ToolResultKeys.DOCUMENT_SUMMARY] as? String)
-                            ?: "I couldn't summarize this page.",
-                        requestedAction = (result.data[ToolResultKeys.DOCUMENT_REQUESTED_ACTION] as? String)
-                            ?: "Please review the instructions carefully.",
-                        worries = (result.data[ToolResultKeys.DOCUMENT_WORRIES] as? String)
-                            ?: "No specific warning signs detected.",
-                        ignore = (result.data[ToolResultKeys.DOCUMENT_IGNORE] as? String)
-                            ?: "Ignore repeated formatting details.",
-                        risk = (result.data[ToolResultKeys.DOCUMENT_RISK] as? String) ?: "LOW",
-                        extractedTextPreview = (result.data[ToolResultKeys.DOCUMENT_TEXT] as? String)
-                            .orEmpty()
-                            .take(300)
-                    )
-                    _uiState.value = _uiState.value.copy(
-                        isMedicineLensAnalyzing = false,
-                        medicineLensResult = cardData,
-                        medicineLensError = null
-                    )
-                    if (result.message.isNotBlank()) {
-                        textToSpeechManager.speak(result.message)
+            when (mode) {
+                LensMode.MEDICINE -> {
+                    runCatching { medicineLensAnalyzer.analyze(uri) }
+                        .onSuccess { result ->
+                            _uiState.value = _uiState.value.copy(
+                                isMedicineLensAnalyzing = false,
+                                medicineLensResult = LensCardData.Medicine(result),
+                                medicineLensError = null
+                            )
+                            if (result.summary.isNotBlank()) {
+                                textToSpeechManager.speak(result.summary)
+                            }
+                        }
+                        .onFailure { error ->
+                            _uiState.value = _uiState.value.copy(
+                                isMedicineLensAnalyzing = false,
+                                medicineLensResult = null,
+                                medicineLensError = "I could not read that medicine photo clearly: " +
+                                    error.toReadableMessage()
+                            )
+                        }
+                }
+                LensMode.DOCUMENT -> {
+                    runCatching { documentReaderAnalyzer.analyze(uri) }
+                        .onSuccess { result ->
+                            val cardData = DocumentReadingCardData(
+                                summary = (result.data[ToolResultKeys.DOCUMENT_SUMMARY] as? String)
+                                    ?: "I couldn't summarize this page.",
+                                risk = (result.data[ToolResultKeys.DOCUMENT_RISK] as? String) ?: "LOW"
+                            )
+                            _uiState.value = _uiState.value.copy(
+                                isMedicineLensAnalyzing = false,
+                                medicineLensResult = LensCardData.Document(cardData),
+                                medicineLensError = null
+                            )
+                            if (result.message.isNotBlank()) {
+                                textToSpeechManager.speak(result.message)
+                            }
+                        }
+                        .onFailure { error ->
+                            _uiState.value = _uiState.value.copy(
+                                isMedicineLensAnalyzing = false,
+                                medicineLensResult = null,
+                                medicineLensError = "I could not read that document clearly: " +
+                                    error.toReadableMessage()
+                            )
+                        }
                     }
                 }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        isMedicineLensAnalyzing = false,
-                        medicineLensResult = null,
-                        medicineLensError = "I could not read that photo clearly: " +
-                            error.toReadableMessage()
-                    )
-                }
+            }
         }
     }
 
     fun onMedicinePhotoNotCaptured() {
+        val modeCopy = if (_uiState.value.selectedLensMode == LensMode.MEDICINE) {
+            "medicine label"
+        } else {
+            "document"
+        }
         _uiState.value = _uiState.value.copy(
-            medicineLensError = "No photo was captured. Please try again with the document flat and in good light."
+            medicineLensError = "No photo was captured. Please try again with the $modeCopy flat and in good light."
         )
     }
 

@@ -1,6 +1,7 @@
 package com.aasa.eldercare.ui.home
 
 import com.aasa.eldercare.agent.AgentAction
+import com.aasa.eldercare.medicine.MedicineLensResult
 import com.aasa.eldercare.tools.ToolActionTypes
 
 /**
@@ -37,7 +38,8 @@ data class HomeUiState(
 
     /** Medicine Lens: camera OCR result for prescription labels / tablet strips. */
     val isMedicineLensAnalyzing: Boolean = false,
-    val medicineLensResult: DocumentReadingCardData? = null,
+    val selectedLensMode: LensMode = LensMode.DOCUMENT,
+    val medicineLensResult: LensCardData? = null,
     val medicineLensError: String? = null,
 
     /** Phase 7 deferred-confirmation action payload. */
@@ -116,13 +118,24 @@ data class HomeUiState(
         get() = agentAction?.riskLevel?.let { RiskCopy.fromRaw(it) }
 }
 
+enum class LensMode {
+    MEDICINE,
+    DOCUMENT
+}
+
+sealed interface LensCardData {
+    data class Medicine(
+        val result: MedicineLensResult
+    ) : LensCardData
+
+    data class Document(
+        val result: DocumentReadingCardData
+    ) : LensCardData
+}
+
 data class DocumentReadingCardData(
     val summary: String,
-    val requestedAction: String,
-    val worries: String,
-    val ignore: String,
-    val risk: String,
-    val extractedTextPreview: String
+    val risk: String
 )
 
 /**

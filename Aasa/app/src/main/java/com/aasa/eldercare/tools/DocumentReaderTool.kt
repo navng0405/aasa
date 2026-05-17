@@ -20,95 +20,107 @@ class DocumentReaderTool : AgentTool {
                 message = "I couldn't read that page clearly. Try a brighter photo with the page flat.",
                 data = mapOf(
                     ToolResultKeys.ACTION_TYPE to ToolActionTypes.DOCUMENT_READING,
-                    ToolResultKeys.DOCUMENT_SUMMARY to "No readable text found.",
-                    ToolResultKeys.DOCUMENT_REQUESTED_ACTION to "Take another photo with better lighting.",
-                    ToolResultKeys.DOCUMENT_WORRIES to "Unreadable image.",
-                    ToolResultKeys.DOCUMENT_IGNORE to "Ignore blurry letters caused by camera angle.",
+                    ToolResultKeys.DOCUMENT_SUMMARY to
+                        "I could not read enough text from this photo. Please retake it with brighter light and the page fully visible.",
                     ToolResultKeys.DOCUMENT_RISK to "LOW",
                     ToolResultKeys.PERSISTED to false
                 )
             )
         }
 
-        val lower = text.lowercase()
-        val summary = summarize(lower)
-        val requestedAction = requestedAction(lower)
-        val worries = worries(lower)
-        val ignore = ignorableParts(lower)
-        val risk = riskBand(lower)
-        val spoken = "$summary $requestedAction"
+        val summary = buildTwoSentenceSummary(text)
+        val risk = riskBand(text.lowercase())
 
         return ToolResult.ok(
-            message = spoken,
+            message = summary,
             data = mapOf(
                 ToolResultKeys.ACTION_TYPE to ToolActionTypes.DOCUMENT_READING,
-                ToolResultKeys.DOCUMENT_TEXT to text.take(1800),
                 ToolResultKeys.DOCUMENT_SUMMARY to summary,
-                ToolResultKeys.DOCUMENT_REQUESTED_ACTION to requestedAction,
-                ToolResultKeys.DOCUMENT_WORRIES to worries,
-                ToolResultKeys.DOCUMENT_IGNORE to ignore,
                 ToolResultKeys.DOCUMENT_RISK to risk,
                 ToolResultKeys.PERSISTED to false
             )
         )
     }
 
-    private fun summarize(lower: String): String = when {
-        lower.contains("invoice") || lower.contains("bill") || lower.contains("amount due") ->
-            "This looks like a bill or payment notice. It shows charges and may include a due date."
-        lower.contains("application form") || lower.contains("apply") || lower.contains("scheme") ->
-            "This looks like an application or benefits form. It is asking for personal details and eligibility information."
-        lower.contains("urgent") && lower.contains("payment") ->
-            "This looks like an urgent payment message. It is trying to push fast action."
-        else ->
-            "This looks like an official letter or form. It includes instructions and key dates to review carefully."
+    private fun buildTwoSentenceSummary(text: String): String {
+        val normalized = text.replace(Regex("\\s+"), " ").trim()
+        val lower = normalized.lowercase()
+        val kind = detectKind(lower)
+        val amount = MONEY_REGEX.find(normalized)?.value
+        val dueDate = DATE_REGEX.find(normalized)?.value
+        val reference = REFERENCE_REGEX.find(normalized)?.value
+        val actionPhrase = detectActionPhrase(lower)
+        val entity = detectEntity(normalized)
+
+        val first = buildString {
+            append("This appears to be ")
+            append(kind)
+            entity?.let { append(" from ").append(it) }
+            amount?.let { append(" with an amount of ").append(it) }
+            dueDate?.let { append(" and a date ").append(dueDate) }
+            append(".")
+        }
+
+        val second = buildString {
+            append("It asks you to ")
+            append(actionPhrase)
+            reference?.let { append(" using reference ").append(it) }
+            append(".")
+        }
+        return "$first $second"
     }
 
-    private fun requestedAction(lower: String): String = when {
-        lower.contains("due date") || lower.contains("pay by") || lower.contains("amount due") ->
-            "What this asks you to do: verify the amount and due date, then pay only through a trusted official channel."
-        lower.contains("submit") || lower.contains("application") || lower.contains("documents required") ->
-            "What this asks you to do: fill the form and submit the listed documents before the deadline."
-        lower.contains("click link") || lower.contains("verify account") ->
-            "What this asks you to do: it asks you to verify details quickly; do not use unknown links."
-        else ->
-            "What this asks you to do: review the main instruction, note any deadline, and confirm with a trusted person if unsure."
+    private fun detectKind(lower: String): String = when {
+        anyContains(lower, "invoice", "tax invoice", "amount due", "total due", "bill") ->
+            "a billing notice"
+        anyContains(lower, "application form", "apply", "scheme", "eligibility", "benefit") ->
+            "an application form"
+        anyContains(lower, "hospital", "clinic", "medical", "medicare", "statement") ->
+            "a medical statement"
+        anyContains(lower, "final warning", "urgent", "suspended", "legal action") ->
+            "an urgent warning letter"
+        else -> "a document notice"
     }
 
-    private fun worries(lower: String): String {
-        val flags = mutableListOf<String>()
-        if (lower.contains("gift card") || lower.contains("wire transfer") || lower.contains("crypto")) {
-            flags += "Unusual payment method request."
-        }
-        if (lower.contains("otp") || lower.contains("one time password") || lower.contains("verification code")) {
-            flags += "Request for OTP/security code."
-        }
-        if (lower.contains("final warning") || lower.contains("suspended") || lower.contains("legal action")) {
-            flags += "Fear or threat language."
-        }
-        if (lower.contains("immediate") || lower.contains("within 24 hours") || lower.contains("urgent")) {
-            flags += "Artificial urgency."
-        }
-        return when {
-            flags.isNotEmpty() -> flags.joinToString(" ")
-            lower.contains("bill") -> "Check duplicate fees, incorrect dates, and unexplained penalties."
-            else -> "Watch for mismatched names, strange contacts, or pressure to act quickly."
-        }
+    private fun detectActionPhrase(lower: String): String = when {
+        anyContains(lower, "pay by", "due date", "amount due", "total due") ->
+            "review the charges and pay through the official channel"
+        anyContains(lower, "submit", "application", "documents required", "attach") ->
+            "fill and submit the requested form details"
+        anyContains(lower, "verify account", "click link", "otp", "verification code") ->
+            "verify the sender first and avoid sharing codes or clicking unknown links"
+        else ->
+            "review the key instruction and confirm with a trusted helper before acting"
     }
 
-    private fun ignorableParts(lower: String): String = when {
-        lower.contains("terms and conditions") || lower.contains("boilerplate") ->
-            "You can ignore long legal boilerplate for now and focus on amount, deadline, and required action."
-        lower.contains("advertisement") || lower.contains("offer") ->
-            "You can ignore marketing offers that are unrelated to the main notice."
-        else ->
-            "You can ignore repeated reference numbers and decorative formatting while deciding next steps."
-    }
+    private fun detectEntity(text: String): String? =
+        ENTITY_REGEX.find(text)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.length >= 3 }
+            ?.take(48)
+
+    private fun anyContains(haystack: String, vararg needles: String): Boolean =
+        needles.any { haystack.contains(it) }
 
     private fun riskBand(lower: String): String = when {
         lower.contains("gift card") || lower.contains("wire transfer") ||
             lower.contains("otp") || lower.contains("verification code") -> "HIGH"
         lower.contains("urgent") || lower.contains("final warning") -> "MEDIUM"
         else -> "LOW"
+    }
+
+    companion object {
+        private val MONEY_REGEX = Regex("""(?:₹|\$|USD|INR)\s?\d[\d,]*(?:\.\d{1,2})?""", RegexOption.IGNORE_CASE)
+        private val DATE_REGEX = Regex(
+            """\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{2,4})\b""",
+            RegexOption.IGNORE_CASE
+        )
+        private val REFERENCE_REGEX = Regex(
+            """\b(?:ref(?:erence)?|invoice|account|application|claim)\s*(?:no|number|#|id)?[:\-\s]*([A-Z0-9\-]{4,})\b""",
+            RegexOption.IGNORE_CASE
+        )
+        private val ENTITY_REGEX = Regex(
+            """(?:from|issuer|hospital|clinic|department|ministry|bank)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]{3,})""",
+            RegexOption.IGNORE_CASE
+        )
     }
 }
