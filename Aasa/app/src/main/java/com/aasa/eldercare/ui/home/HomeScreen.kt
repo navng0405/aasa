@@ -153,6 +153,7 @@ fun HomeScreen(
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         viewModel.setMicPermissionGranted(granted)
+        viewModel.onForegroundActivity()
         // Phase 11: warm "Good morning, <name>..." greeting on launch.
         // Runs after mic state is set so the post-greeting auto-listen
         // flag knows whether to fire.
@@ -217,6 +218,12 @@ fun HomeScreen(
                 },
                 onStopSpeakingClick = viewModel::stopSpeaking,
                 onDismissVoiceError = viewModel::clearVoiceError
+            )
+
+            DailyHeartbeatSection(
+                loggedToday = uiState.heartbeatLoggedToday,
+                isLogging = uiState.isLoggingHeartbeat,
+                onPing = viewModel::logDailyHeartbeat
             )
 
             HeardSection(text = uiState.recognizedSpeech)
@@ -764,6 +771,62 @@ private fun ManualInputSection(
 }
 
 @Composable
+private fun DailyHeartbeatSection(
+    loggedToday: Boolean,
+    isLogging: Boolean,
+    onPing: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (loggedToday) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Did anyone notice?",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = if (loggedToday) {
+                    "Aasa heard from you today."
+                } else {
+                    "Tap once each day so Aasa knows you are okay."
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Button(
+                onClick = onPing,
+                enabled = !isLogging && !loggedToday,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+            ) {
+                Text(
+                    text = if (loggedToday) {
+                        "I'm here today (saved)"
+                    } else if (isLogging) {
+                        "Saving..."
+                    } else {
+                        "I'm here today"
+                    },
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun MedicineLensSection(
     isAnalyzing: Boolean,
     result: MedicineLensResult?,
@@ -1129,6 +1192,24 @@ private fun PendingActionSection(
                 onDismiss = onDismiss
             )
         }
+        uiState.showWellnessCheckCard -> {
+            WellnessCheckActionCard(
+                contactName = uiState.pendingContactName,
+                prompt = uiState.pendingAlertMessage,
+                smsBody = uiState.pendingScamMessageText,
+                silenceHours = uiState.pendingSilenceHours,
+                heartbeatState = uiState.pendingHeartbeatState,
+                onOpenSms = {
+                    val number = uiState.pendingPhoneNumber
+                    val body = uiState.pendingScamMessageText
+                    if (!number.isNullOrBlank() && !body.isNullOrBlank()) {
+                        onOpenSms(number, body)
+                    }
+                    onDismiss()
+                },
+                onDismiss = onDismiss
+            )
+        }
         uiState.showScamAnalysisCard -> {
             ScamAnalysisCard(
                 riskCopy = uiState.scamRiskCopy,
@@ -1182,6 +1263,66 @@ private fun VoiceSection(
 
         uiState.ttsStatus?.let { status ->
             TtsStatusPill(status = status)
+        }
+    }
+}
+
+@Composable
+private fun WellnessCheckActionCard(
+    contactName: String?,
+    prompt: String?,
+    smsBody: String?,
+    silenceHours: Int?,
+    heartbeatState: String?,
+    onOpenSms: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = prompt ?: "Priya hasn't heard from you today. Send her a quick hello?",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            if (heartbeatState?.uppercase() == "ESCALATED") {
+                Text(
+                    text = "No activity for ${silenceHours ?: 0} hours. Aasa prepared a deeper check-in draft.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+            Text(
+                text = "Aasa never sends messages automatically. You choose.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onOpenSms,
+                    enabled = !smsBody.isNullOrBlank(),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Prepare SMS to ${contactName ?: "Priya"}")
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Dismiss")
+                }
+            }
         }
     }
 }
@@ -1472,6 +1613,7 @@ private fun humanizeTool(rawTool: String?): String {
         "SCAMSHIELD", "SCAMSHIELDTOOL" -> "ScamShieldTool"
         "FALLTRIAGE", "FALLTRIAGETOOL" -> "FallTriageTool"
         "MOBILITYSHIELD", "MOBILITYSHIELDTOOL" -> "MobilityShieldTool"
+        "WELLNESSCHECK", "WELLNESSCHECKTOOL" -> "WellnessCheckTool"
         else -> cleaned
     }
 }

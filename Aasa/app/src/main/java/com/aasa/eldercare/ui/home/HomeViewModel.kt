@@ -13,12 +13,14 @@ import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.preferences.UserPreferences
 import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.data.repository.MedicationRepository
+import com.aasa.eldercare.data.repository.PresencePingRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
 import com.aasa.eldercare.medicine.MedicineLensAnalyzer
 import com.aasa.eldercare.model.GemmaRouter
 import com.aasa.eldercare.tools.ToolActionTypes
 import com.aasa.eldercare.tools.ToolResult
 import com.aasa.eldercare.tools.ToolResultKeys
+import com.aasa.eldercare.tools.WellnessCheckTool
 import com.aasa.eldercare.voice.HotwordService
 import com.aasa.eldercare.voice.SpeechEvent
 import com.aasa.eldercare.voice.SpeechToTextManager
@@ -54,6 +56,7 @@ class HomeViewModel(
     private val orchestrator: AgentOrchestrator,
     private val conversationRepository: ConversationRepository,
     private val medicationRepository: MedicationRepository,
+    private val presencePingRepository: PresencePingRepository,
     private val trustedContactRepository: TrustedContactRepository,
     private val speechToTextManager: SpeechToTextManager,
     private val textToSpeechManager: TextToSpeechManager,
@@ -99,6 +102,8 @@ class HomeViewModel(
         observeTtsEvents()
         startHealthProbe()
         autoStartHotwordIfOptedIn()
+        refreshHeartbeatStatus()
+        startWellnessPolling()
     }
 
     // ---------------------------------------------------------------
@@ -126,6 +131,7 @@ class HomeViewModel(
     fun sendCurrentMessage() {
         val message = _uiState.value.inputText.trim()
         if (message.isEmpty() || _uiState.value.isLoading) return
+        userPreferences.lastForegroundActivityAtMs = System.currentTimeMillis()
         sendMessage(message)
     }
 
@@ -149,7 +155,9 @@ class HomeViewModel(
                 pendingScamRisk = null,
                 pendingScamSignals = emptyList(),
                 pendingSafeAction = null,
-                pendingScamMessageText = null
+                pendingScamMessageText = null,
+                pendingHeartbeatState = null,
+                pendingSilenceHours = null
             )
             runCatching { orchestrator.handleUserMessage(message) }
                 .onSuccess { result ->
@@ -173,6 +181,8 @@ class HomeViewModel(
                         pendingScamSignals = pending.scamSignals,
                         pendingSafeAction = pending.safeAction,
                         pendingScamMessageText = pending.scamMessageText,
+                        pendingHeartbeatState = pending.heartbeatState,
+                        pendingSilenceHours = pending.silenceHours,
                         gemmaConnection = GemmaConnectionState.CONNECTED,
                         selectedGemmaMode = if (gemmaRouter.usingBridge) {
                             GemmaRuntimeMode.MAC_BRIDGE
@@ -206,6 +216,8 @@ class HomeViewModel(
                         pendingScamSignals = emptyList(),
                         pendingSafeAction = null,
                         pendingScamMessageText = null,
+                        pendingHeartbeatState = null,
+                        pendingSilenceHours = null,
                         gemmaConnection = GemmaConnectionState.DISCONNECTED,
                         gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
                         gemmaStatusDetail = error.toReadableMessage()
@@ -243,6 +255,15 @@ class HomeViewModel(
                 safeAction = (data[ToolResultKeys.SAFE_ACTION] as? String)?.takeIf { it.isNotBlank() },
                 scamMessageText = (data[ToolResultKeys.MESSAGE_TEXT] as? String)?.takeIf { it.isNotBlank() }
             )
+            ToolActionTypes.WELLNESS_CHECK -> PendingAction(
+                actionType = actionType,
+                contactName = (data[ToolResultKeys.CONTACT_NAME] as? String)?.takeIf { it.isNotBlank() },
+                phoneNumber = (data[ToolResultKeys.PHONE_NUMBER] as? String)?.takeIf { it.isNotBlank() },
+                alertMessage = (data[ToolResultKeys.ALERT_MESSAGE] as? String)?.takeIf { it.isNotBlank() },
+                scamMessageText = (data[ToolResultKeys.MESSAGE_TEXT] as? String)?.takeIf { it.isNotBlank() },
+                heartbeatState = (data[ToolResultKeys.HEARTBEAT_STATE] as? String)?.takeIf { it.isNotBlank() },
+                silenceHours = (data[ToolResultKeys.SILENCE_HOURS] as? Number)?.toInt()
+            )
             else -> PendingAction.NONE
         }
     }
@@ -268,7 +289,9 @@ class HomeViewModel(
             pendingScamRisk = null,
             pendingScamSignals = emptyList(),
             pendingSafeAction = null,
-            pendingScamMessageText = null
+            pendingScamMessageText = null,
+            pendingHeartbeatState = null,
+            pendingSilenceHours = null
         )
     }
 
@@ -281,7 +304,9 @@ class HomeViewModel(
         val scamRisk: String? = null,
         val scamSignals: List<String> = emptyList(),
         val safeAction: String? = null,
-        val scamMessageText: String? = null
+        val scamMessageText: String? = null,
+        val heartbeatState: String? = null,
+        val silenceHours: Int? = null
     ) {
         companion object {
             val NONE = PendingAction()
@@ -290,6 +315,37 @@ class HomeViewModel(
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+
+    fun logDailyHeartbeat() {
+        if (_uiState.value.isLoggingHeartbeat) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            _uiState.value = _uiState.value.copy(isLoggingHeartbeat = true)
+            runCatching {
+                presencePingRepository.logPing(now)
+                userPreferences.lastForegroundActivityAtMs = now
+                userPreferences.lastWellnessPromptDayStartMs = presencePingRepository.dayStart(now)
+                true
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    isLoggingHeartbeat = false,
+                    heartbeatLoggedToday = true
+                )
+                publishTransientMessage("Thanks. Your daily check-in is saved.")
+                dismissPendingAction()
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    isLoggingHeartbeat = false,
+                    errorMessage = "Could not save today's check-in: ${error.toReadableMessage()}"
+                )
+            }
+        }
+    }
+
+    fun onForegroundActivity() {
+        userPreferences.lastForegroundActivityAtMs = System.currentTimeMillis()
+        refreshHeartbeatStatus()
     }
 
     fun resetDemoData() {
@@ -315,6 +371,8 @@ class HomeViewModel(
                         pendingScamSignals = emptyList(),
                         pendingSafeAction = null,
                         pendingScamMessageText = null,
+                        pendingHeartbeatState = null,
+                        pendingSilenceHours = null,
                         recognizedSpeech = null,
                         errorMessage = null,
                         voiceError = null
@@ -480,6 +538,7 @@ class HomeViewModel(
     fun onSpeechRecognized(text: String) {
         val cleaned = text.trim()
         if (cleaned.isBlank()) return
+        userPreferences.lastSpokenInteractionAtMs = System.currentTimeMillis()
         if (isWakePhrase(cleaned)) {
             _uiState.value = _uiState.value.copy(
                 recognizedSpeech = cleaned,
@@ -652,6 +711,100 @@ class HomeViewModel(
             }
     }
 
+    private fun refreshHeartbeatStatus() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val dayStart = presencePingRepository.dayStart(now)
+            val loggedToday = presencePingRepository.hasPingInWindow(dayStart, now + 1)
+            _uiState.value = _uiState.value.copy(heartbeatLoggedToday = loggedToday)
+        }
+    }
+
+    private fun startWellnessPolling() {
+        viewModelScope.launch {
+            while (isActive) {
+                evaluateWellnessSilence()
+                delay(WELLNESS_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun evaluateWellnessSilence() {
+        val now = System.currentTimeMillis()
+        val dayStart = presencePingRepository.dayStart(now)
+        val morningWindow = presencePingRepository.learnedMorningWindow(now)
+        val windowStart = morningWindow.startMsForDay(dayStart)
+        val windowEnd = morningWindow.endMsForDay(dayStart)
+        val hasPing = presencePingRepository.hasPingInWindow(dayStart, now + 1)
+        _uiState.value = _uiState.value.copy(heartbeatLoggedToday = hasPing)
+        if (hasPing || now < windowEnd) return
+
+        val hadForeground = userPreferences.lastForegroundActivityAtMs in windowStart until windowEnd
+        val hadSpoken = userPreferences.lastSpokenInteractionAtMs in windowStart until windowEnd
+        val hadMessage = conversationRepository.hasUserMessageInWindow(windowStart, windowEnd)
+        if (hadForeground || hadSpoken || hadMessage) return
+
+        val silenceHours = ((now - windowEnd) / (60L * 60L * 1000L)).toInt().coerceAtLeast(1)
+        if (userPreferences.lastWellnessPromptDayStartMs != dayStart) {
+            triggerWellnessCheck(
+                state = WellnessCheckTool.STATE_ELDER_PROMPT,
+                silenceHours = silenceHours,
+                morningWindow = morningWindow
+            )
+            userPreferences.lastWellnessPromptDayStartMs = dayStart
+            return
+        }
+
+        val shouldEscalate = silenceHours >= WELLNESS_ESCALATION_HOURS &&
+            (now - userPreferences.lastWellnessEscalationAtMs) >= WELLNESS_ESCALATION_COOLDOWN_MS
+        if (shouldEscalate) {
+            triggerWellnessCheck(
+                state = WellnessCheckTool.STATE_ESCALATED,
+                silenceHours = silenceHours,
+                morningWindow = morningWindow
+            )
+            userPreferences.lastWellnessEscalationAtMs = now
+        }
+    }
+
+    private suspend fun triggerWellnessCheck(
+        state: String,
+        silenceHours: Int,
+        morningWindow: PresencePingRepository.MorningWindow
+    ) {
+        val syntheticMessage = if (state == WellnessCheckTool.STATE_ESCALATED) {
+            "Daily heartbeat timeout: wellness check escalation."
+        } else {
+            "Daily heartbeat timeout: wellness check timeout."
+        }
+        val result = orchestrator.handleUserMessage(syntheticMessage)
+        val smsBody = if (state == WellnessCheckTool.STATE_ESCALATED) {
+            "Aasa wellness check: no heartbeat for $silenceHours hours. Please check in soon. $WELLNESS_DEEP_LINK"
+        } else {
+            "Hi Priya, it's me. I'm okay today. - Sent from Aasa"
+        }
+        val patchedResult = result.toolResult.copy(
+            data = result.toolResult.data + mapOf(
+                WellnessCheckTool.ARG_STATE to state,
+                WellnessCheckTool.ARG_SILENCE_HOURS to silenceHours,
+                WellnessCheckTool.ARG_WINDOW_START_HOUR to morningWindow.startHour24,
+                WellnessCheckTool.ARG_WINDOW_END_HOUR to morningWindow.endHour24,
+                WellnessCheckTool.ARG_DEEP_LINK to WELLNESS_DEEP_LINK,
+                ToolResultKeys.MESSAGE_TEXT to smsBody
+            )
+        )
+        val pending = parsePendingAction(patchedResult)
+        _uiState.value = _uiState.value.copy(
+            pendingActionType = pending.actionType,
+            pendingContactName = pending.contactName,
+            pendingPhoneNumber = pending.phoneNumber,
+            pendingAlertMessage = pending.alertMessage,
+            pendingScamMessageText = pending.scamMessageText,
+            pendingHeartbeatState = pending.heartbeatState,
+            pendingSilenceHours = pending.silenceHours
+        )
+    }
+
     override fun onCleared() {
         speechToTextManager.destroy()
         textToSpeechManager.shutdown()
@@ -812,6 +965,7 @@ class HomeViewModel(
                 orchestrator = application.agentOrchestrator,
                 conversationRepository = application.conversationRepository,
                 medicationRepository = application.medicationRepository,
+                presencePingRepository = application.presencePingRepository,
                 trustedContactRepository = application.trustedContactRepository,
                 speechToTextManager = SpeechToTextManager(application.applicationContext),
                 textToSpeechManager = TextToSpeechManager(application.applicationContext),
@@ -825,6 +979,10 @@ class HomeViewModel(
 
     private companion object {
         const val HEALTH_PROBE_INTERVAL_MS = 15_000L
+        const val WELLNESS_POLL_INTERVAL_MS = 30_000L
+        const val WELLNESS_ESCALATION_HOURS = 14
+        const val WELLNESS_ESCALATION_COOLDOWN_MS = 6L * 60L * 60L * 1000L
+        const val WELLNESS_DEEP_LINK = "aasa://wellness-check?source=heartbeat"
         val WAKE_PHRASES = setOf(
             "hey aasa",
             "hey asa",

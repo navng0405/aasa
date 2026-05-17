@@ -33,6 +33,8 @@ data class HomeUiState(
     val voiceError: String? = null,
     val ttsStatus: String? = null,
     val hasMicPermission: Boolean = false,
+    val isLoggingHeartbeat: Boolean = false,
+    val heartbeatLoggedToday: Boolean = false,
 
     /** Medicine Lens: camera OCR result for prescription labels / tablet strips. */
     val isMedicineLensAnalyzing: Boolean = false,
@@ -54,6 +56,8 @@ data class HomeUiState(
     val pendingScamSignals: List<String> = emptyList(),
     val pendingSafeAction: String? = null,
     val pendingScamMessageText: String? = null,
+    val pendingHeartbeatState: String? = null,
+    val pendingSilenceHours: Int? = null,
 
     /** Phase 8: local Gemma 4 server health. */
     val selectedGemmaMode: GemmaRuntimeMode = GemmaRuntimeMode.ON_DEVICE,
@@ -104,6 +108,10 @@ data class HomeUiState(
     val showScamAnalysisCard: Boolean
         get() = pendingActionType == ToolActionTypes.SCAM_ANALYSIS &&
             !pendingScamRisk.isNullOrBlank()
+
+    val showWellnessCheckCard: Boolean
+        get() = pendingActionType == ToolActionTypes.WELLNESS_CHECK &&
+            !pendingPhoneNumber.isNullOrBlank()
 
     val scamRiskCopy: ScamRiskCopy?
         get() = pendingScamRisk?.let { ScamRiskCopy.fromRaw(it) }

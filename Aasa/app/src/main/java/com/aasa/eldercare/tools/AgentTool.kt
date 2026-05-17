@@ -28,4 +28,5 @@ object ToolNames {
     const val FALL_TRIAGE = "FallTriageTool"
     const val MOBILITY_SHIELD = "MobilityShieldTool"
     const val HEALTH_BRIEFING = "HealthBriefingTool"
+    const val WELLNESS_CHECK = "WellnessCheckTool"
 }

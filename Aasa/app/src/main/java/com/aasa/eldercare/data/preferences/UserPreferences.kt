@@ -47,6 +47,30 @@ class UserPreferences(context: Context) {
             prefs.edit().putBoolean(KEY_HOTWORD_ENABLED, value).apply()
         }
 
+    var lastForegroundActivityAtMs: Long
+        get() = prefs.getLong(KEY_LAST_FOREGROUND_ACTIVITY_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_FOREGROUND_ACTIVITY_AT, value).apply()
+        }
+
+    var lastSpokenInteractionAtMs: Long
+        get() = prefs.getLong(KEY_LAST_SPOKEN_INTERACTION_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_SPOKEN_INTERACTION_AT, value).apply()
+        }
+
+    var lastWellnessPromptDayStartMs: Long
+        get() = prefs.getLong(KEY_LAST_WELLNESS_PROMPT_DAY_START, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_WELLNESS_PROMPT_DAY_START, value).apply()
+        }
+
+    var lastWellnessEscalationAtMs: Long
+        get() = prefs.getLong(KEY_LAST_WELLNESS_ESCALATION_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_WELLNESS_ESCALATION_AT, value).apply()
+        }
+
     fun shouldGreet(nowMs: Long, cooldownMs: Long = DEFAULT_COOLDOWN_MS): Boolean {
         val last = lastGreetingAtMs
         if (last == 0L) return true
@@ -62,6 +86,10 @@ class UserPreferences(context: Context) {
         private const val KEY_USER_NAME = "user_name"
         private const val KEY_LAST_GREETING_AT = "last_greeting_at"
         private const val KEY_HOTWORD_ENABLED = "hotword_enabled"
+        private const val KEY_LAST_FOREGROUND_ACTIVITY_AT = "last_foreground_activity_at"
+        private const val KEY_LAST_SPOKEN_INTERACTION_AT = "last_spoken_interaction_at"
+        private const val KEY_LAST_WELLNESS_PROMPT_DAY_START = "last_wellness_prompt_day_start"
+        private const val KEY_LAST_WELLNESS_ESCALATION_AT = "last_wellness_escalation_at"
 
         const val DEFAULT_NAME: String = "friend"
 

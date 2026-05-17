@@ -7,11 +7,13 @@ import androidx.room.RoomDatabase
 import com.aasa.eldercare.data.dao.ConversationDao
 import com.aasa.eldercare.data.dao.MedicationDao
 import com.aasa.eldercare.data.dao.MemoryDao
+import com.aasa.eldercare.data.dao.PresencePingDao
 import com.aasa.eldercare.data.dao.TrustedContactDao
 import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.data.entity.MedicationEntity
 import com.aasa.eldercare.data.entity.MedicationLogEntity
 import com.aasa.eldercare.data.entity.MemoryEntity
+import com.aasa.eldercare.data.entity.PresencePingEntity
 import com.aasa.eldercare.data.entity.TrustedContactEntity
 
 @Database(
@@ -20,9 +22,10 @@ import com.aasa.eldercare.data.entity.TrustedContactEntity
         MedicationLogEntity::class,
         MemoryEntity::class,
         TrustedContactEntity::class,
-        ConversationEntity::class
+        ConversationEntity::class,
+        PresencePingEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -31,6 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
     abstract fun trustedContactDao(): TrustedContactDao
     abstract fun conversationDao(): ConversationDao
+    abstract fun presencePingDao(): PresencePingDao
 
     companion object {
         private const val DATABASE_NAME = "aasa.db"

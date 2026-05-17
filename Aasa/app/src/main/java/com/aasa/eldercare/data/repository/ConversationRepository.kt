@@ -34,6 +34,13 @@ class ConversationRepository(
         )
     )
 
+    suspend fun hasUserMessageInWindow(startMs: Long, endMs: Long): Boolean =
+        dao.hasConversationInWindow(
+            role = ConversationEntity.ROLE_USER,
+            startMs = startMs,
+            endMs = endMs
+        )
+
     companion object {
         private const val DEFAULT_RECENT_LIMIT = 20
     }

@@ -145,6 +145,14 @@ class AgentOrchestrator(
                 arguments = enrichedArgs
             )
 
+            // --- 1d. Daily heartbeat / wellness-check override ----------
+            IntentKeywords.isWellnessCheckRequest(userMessage) -> action.copy(
+                intent = INTENT_WELLNESS_CHECK,
+                tool = ToolNames.WELLNESS_CHECK,
+                riskLevel = action.riskLevel.ifBlank { RISK_MEDIUM },
+                arguments = enrichedArgs
+            )
+
             // --- 1b. Scam Shield override -------------------------------
             // Either an explicit "analyze this suspicious message:"
             // request OR raw text the keyword scanner already flags as
@@ -208,6 +216,7 @@ class AgentOrchestrator(
         private const val INTENT_FALL_TRIAGE = "FALL_TRIAGE"
         private const val INTENT_MOBILITY_CHECK = "MOBILITY_CHECK"
         private const val INTENT_HEALTH_BRIEFING = "HEALTH_BRIEFING"
+        private const val INTENT_WELLNESS_CHECK = "WELLNESS_CHECK"
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"

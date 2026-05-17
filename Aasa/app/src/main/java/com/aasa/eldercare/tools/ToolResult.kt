@@ -75,6 +75,13 @@ object ToolResultKeys {
     const val IS_MOCK_DATA = "isMockData"
     const val BRIEFING_TEXT = "briefingText"
     const val BRIEFING_HIGHLIGHTS = "briefingHighlights"
+
+    // Daily heartbeat (headline feature)
+    const val HEARTBEAT_STATE = "heartbeatState"
+    const val WINDOW_START_HOUR = "windowStartHour"
+    const val WINDOW_END_HOUR = "windowEndHour"
+    const val SILENCE_HOURS = "silenceHours"
+    const val DEEP_LINK = "deepLink"
 }
 
 /**
@@ -90,6 +97,7 @@ object ToolActionTypes {
     const val FALL_TRIAGE = "FALL_TRIAGE"
     const val MOBILITY_CHECK = "MOBILITY_CHECK"
     const val HEALTH_BRIEFING = "HEALTH_BRIEFING"
+    const val WELLNESS_CHECK = "WELLNESS_CHECK"
 }
 
 /**

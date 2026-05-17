@@ -14,4 +14,12 @@ interface ConversationDao {
 
     @Query("SELECT * FROM conversations ORDER BY createdAt DESC LIMIT :limit")
     fun getRecentConversations(limit: Int): Flow<List<ConversationEntity>>
+
+    @Query(
+        "SELECT EXISTS(" +
+            "SELECT 1 FROM conversations " +
+            "WHERE role = :role AND createdAt >= :startMs AND createdAt < :endMs" +
+            ")"
+    )
+    suspend fun hasConversationInWindow(role: String, startMs: Long, endMs: Long): Boolean
 }

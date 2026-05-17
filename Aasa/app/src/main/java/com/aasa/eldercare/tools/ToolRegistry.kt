@@ -57,7 +57,8 @@ class ToolRegistry private constructor(
                 ScamShieldTool(trustedContactRepository),
                 FallTriageTool(trustedContactRepository),
                 MobilityShieldTool(trustedContactRepository),
-                HealthBriefingTool(healthSnapshotRepository)
+                HealthBriefingTool(healthSnapshotRepository),
+                WellnessCheckTool(trustedContactRepository)
             )
         )
 

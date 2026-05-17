@@ -13,6 +13,7 @@ import com.aasa.eldercare.data.repository.HealthSnapshotRepository
 import com.aasa.eldercare.data.repository.ConversationRepository
 import com.aasa.eldercare.data.repository.MedicationRepository
 import com.aasa.eldercare.data.repository.MemoryRepository
+import com.aasa.eldercare.data.repository.PresencePingRepository
 import com.aasa.eldercare.data.repository.TrustedContactRepository
 import com.aasa.eldercare.data.preferences.UserPreferences
 import com.aasa.eldercare.data.seeder.DemoDataSeeder
@@ -53,6 +54,9 @@ class AasaApplication : Application() {
     }
     val conversationRepository: ConversationRepository by lazy {
         ConversationRepository(database.conversationDao())
+    }
+    val presencePingRepository: PresencePingRepository by lazy {
+        PresencePingRepository(database.presencePingDao())
     }
 
     /** Phase 10: Health Connect snapshot for the Morning Briefing screen. */

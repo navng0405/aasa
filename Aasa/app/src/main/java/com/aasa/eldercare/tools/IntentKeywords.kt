@@ -219,6 +219,22 @@ object IntentKeywords {
         return HEALTH_BRIEFING_TRIGGERS.any { lower.contains(it) }
     }
 
+    // ----------------------------------------------------------------
+    // Daily heartbeat / wellness-check intent
+    // ----------------------------------------------------------------
+
+    private val WELLNESS_CHECK_TRIGGERS: List<String> = listOf(
+        "daily heartbeat timeout",
+        "wellness check timeout",
+        "wellness check escalation",
+        "heartbeat escalation"
+    )
+
+    fun isWellnessCheckRequest(text: String): Boolean {
+        val lower = text.lowercase()
+        return WELLNESS_CHECK_TRIGGERS.any { lower.contains(it) }
+    }
+
     /**
      * Best-effort coarse type for a memory derived from the raw user
      * message – used by [com.aasa.eldercare.tools.MemoryTool] when
