@@ -15,8 +15,12 @@ class GemmaClientError(RuntimeError):
     pass
 
 
-async def call_gemma(user_message: str) -> tuple[dict[str, Any], str]:
-    prompt = build_aasa_prompt(user_message)
+async def call_gemma(
+    user_message: str,
+    recent_context: str = "",
+    device_locale: str = "",
+) -> tuple[dict[str, Any], str]:
+    prompt = build_aasa_prompt(user_message, recent_context, device_locale)
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,

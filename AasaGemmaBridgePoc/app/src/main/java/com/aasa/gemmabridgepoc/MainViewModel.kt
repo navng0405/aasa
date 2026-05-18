@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 
 data class AasaPocUiState(
     val serverUrl: String = "http://127.0.0.1:8000",
-    val message: String = "I took my BP tablet.",
+    val message: String = "I took my Metformin.",
     val isLoading: Boolean = false,
     val status: String = "Ready. Start your FastAPI server, then run: adb reverse tcp:8000 tcp:8000",
     val error: String? = null,
@@ -45,7 +45,7 @@ class MainViewModel : ViewModel() {
     fun fillMedicationExample() {
         _uiState.update {
             it.copy(
-                message = "I took my BP tablet.",
+                message = "I took my Metformin.",
                 error = null,
                 status = "Medication example loaded."
             )

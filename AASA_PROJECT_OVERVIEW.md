@@ -16,7 +16,7 @@ Aasa is a voice-first, local-first safety companion for elders living independen
    Open Aasa. It greets the elder by name with time-aware TTS, then can automatically listen after the greeting if mic permission is granted. Show the name card and replay greeting if needed.
 
 2. **Medication memory grounded in Room**  
-   Tap the `Medication` demo chip: `"I took my BP tablet."`  
+   Tap the `Medication` demo chip: `"I took my Metformin."`  
    Then ask: `"Did I take my medicine today?"`  
    Aasa answers from the medication log, not model memory.
 
@@ -74,7 +74,7 @@ Aasa is a voice-first, local-first safety companion for elders living independen
 - Room database: `aasa.db`.
 - Tables: medications, medication logs, memories, trusted contacts, conversations, and presence pings.
 - `DemoDataSeeder` seeds:
-  - `BP tablet`, `1 tablet`, `08:00 AM`
+  - `Metformin`, `500 mg tablet`, `08:00 AM`
   - `Priya`, daughter, primary care recipient/contact
   - `Mrs Wong`, neighbor helper paired to Priya, consent-gated
   - favorite music memory: old Hindi songs from the 1970s
@@ -219,7 +219,7 @@ Say: "This is not a model pretending to remember. It writes a medication log row
 
 Good prompts:
 
-- `"I took my BP tablet."`
+- `"I took my Metformin."`
 - `"Did I take my medicine today?"`
 
 ### Memory
@@ -258,7 +258,7 @@ Good prompt:
 
 Files: `MedicineLensAnalyzer`, `HomeViewModel.analyzeMedicinePhoto`, Home lens UI.
 
-Say: "This is on-device OCR plus conservative explanation. It can match routine medicines like the BP tablet, but it never certifies a pill as safe."
+Say: "This is on-device OCR plus conservative explanation. It can match routine medicines like Metformin, but it never certifies a pill as safe."
 
 What to show:
 
@@ -444,12 +444,81 @@ Pick one depending on demo setup:
 Show model status/recent conversations.  
 Say: "Gemma decides the conversational shape, but local deterministic rules, local tools, and local confirmation make the safety behavior reliable."
 
+## 15A. Companion + Second Memory Voiceover Demo
+
+Use this when the story is less "tool checklist" and more "Aasa feels like a companion who remembers real life details."
+
+**Screen 1: Home / greeting**
+
+Show: Home screen with Aasa greeting, voice button, model status, and recent conversation area.
+
+Voiceover:
+"Aasa is designed for an elder who may be alone at home. The first screen is not a dashboard full of work. It is a calm companion surface: it can speak, listen, and keep the conversation moving in simple language."
+
+**Screen 2: Companion conversation**
+
+Action: Speak or type:
+
+```text
+I feel lonely this evening and miss my family.
+```
+
+Show: Aasa's warm response in the Home chat area. If TTS is enabled, let it read the answer.
+
+Voiceover:
+"This is the companion layer. Aasa does not jump straight into forms or alarms. It acknowledges the feeling, reassures the elder, and suggests one small next step. The goal is presence without pretending to replace family."
+
+**Screen 3: Save a second family memory**
+
+Action: Speak or type:
+
+```text
+My granddaughter's birthday is on June 10.
+```
+
+Show: The MemoryTool result / saved memory confirmation on Home.
+
+Voiceover:
+"Now the elder shares a normal family detail. Aasa saves this locally as a memory on the phone. This is not model memory or a cloud profile. It is a Room database row that the app can show and recall."
+
+**Screen 4: Memory screen**
+
+Action: Tap the Memory section button.
+
+Show: Memory screen with saved memories, including the birthday memory and any seeded favorite-music memory.
+
+Voiceover:
+"We can open the Memory screen and show exactly what was saved. This matters for trust: the elder and family can see the remembered facts instead of guessing what the AI knows."
+
+**Screen 5: Recall the memory from Home**
+
+Action: Return to Home and ask:
+
+```text
+When is my granddaughter birthday?
+```
+
+Show: Aasa answering from the saved memory, for example June 10.
+
+Voiceover:
+"On a later turn, Aasa can retrieve the birthday from local memory. The important part is that recall is grounded in the app's saved data, not in the model trying to infer or hallucinate."
+
+**Screen 6: Close on local-first architecture**
+
+Show: Home model status and recent conversations.
+
+Voiceover:
+"Gemma shapes the conversation, but local rules route important moments into local tools. Memory, medication, safety cards, and trusted contacts are explicit app features, so the demo remains explainable and controllable."
+
 ## 16. Phrases That Work Well
 
 ```text
-I took my BP tablet.
+I took my Metformin.
 Did I take my medicine today?
 My granddaughter Ananya's birthday is May 12.
+My granddaughter's birthday is on June 10.
+When is my granddaughter birthday?
+I feel lonely this evening and miss my family.
 Call Priya.
 I feel weak and missed my medicine.
 I cannot breathe.

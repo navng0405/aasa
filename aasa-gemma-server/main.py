@@ -27,6 +27,8 @@ medication_log = MedicationLog()
 
 class AgentMessageRequest(BaseModel):
     message: str = Field(..., min_length=1)
+    recentContext: str = ""
+    deviceLocale: str = ""
 
 
 class AgentMessageResponse(BaseModel):
@@ -46,7 +48,11 @@ async def health() -> dict[str, str]:
 @app.post("/agent/message", response_model=AgentMessageResponse)
 async def agent_message(request: AgentMessageRequest) -> AgentMessageResponse:
     try:
-        parsed, raw_response = await call_gemma(request.message)
+        parsed, raw_response = await call_gemma(
+            request.message,
+            request.recentContext,
+            request.deviceLocale,
+        )
         intent = str(parsed.get("intent", "CHAT"))
         tool = str(parsed.get("tool", "ChatTool"))
         arguments = parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else {}

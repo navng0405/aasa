@@ -90,7 +90,7 @@ Expected shape:
 ```bash
 curl -X POST http://127.0.0.1:8000/agent/message \
   -H "Content-Type: application/json" \
-  -d '{"message":"I took my BP tablet."}'
+  -d '{"message":"I took my Metformin."}'
 ```
 
 Expected response shape:
@@ -101,10 +101,10 @@ Expected response shape:
   "riskLevel": "LOW",
   "tool": "MedicationTool",
   "arguments": {
-    "medicineName": "BP tablet",
+    "medicineName": "Metformin",
     "status": "taken"
   },
-  "assistantResponse": "Okay, I logged your BP tablet as taken today.",
+  "assistantResponse": "Okay, I logged your Metformin as taken today.",
   "rawResponse": "{...}"
 }
 ```
@@ -170,13 +170,13 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 The FastAPI bridge currently keeps a small in-memory medication log while the
 server process is running. For example:
 
-1. User: `I took BP tablet.`
+1. User: `I took Metformin.`
 2. Aasa logs the medication with the current time.
-3. User: `Did I take BP tablet?`
+3. User: `Did I take Metformin?`
 4. Aasa answers from the in-memory log, such as:
 
 ```text
-Yes, you took your BP tablet at 7:28 PM.
+Yes, you took your Metformin at 7:28 PM.
 ```
 
 This log resets when the FastAPI server restarts. The real app should later move
