@@ -8,7 +8,7 @@ import androidx.room.PrimaryKey
 /**
  * One medication the elder is supposed to take. Identified by [name]
  * (case-insensitive, indexed) so the agent can find or create rows from
- * a Gemma-extracted argument like "BP tablet".
+ * a Gemma-extracted argument like "Metformin".
  */
 @Entity(
     tableName = "medications",

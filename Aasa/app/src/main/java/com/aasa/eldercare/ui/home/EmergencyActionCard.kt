@@ -2,9 +2,9 @@ package com.aasa.eldercare.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 
 /**
  * High-risk safety action. Shown when [com.aasa.eldercare.tools.SafetyTool]
@@ -38,63 +39,66 @@ fun EmergencyActionCard(
     onCallContact: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
         ) {
-            Text(
-                text = "Urgent Safety Concern",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-            Text(
-                text = "This may need immediate help. You can open the emergency dialer or call ${contactName ?: "your trusted contact"}.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-            alertMessage?.takeIf { it.isNotBlank() }?.let { body ->
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
-                    text = body,
+                    text = "Urgent Safety Concern",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = "This may need immediate help. You can open the emergency dialer or call ${contactName ?: "your trusted contact"}.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
-            }
-            Text(
-                text = "Aasa will not call anyone automatically. You must confirm in the dialer.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-
-            Button(
-                onClick = onOpenEmergencyDialer,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError
-                )
-            ) {
-                Text(
-                    text = "Open Emergency Dialer (${emergencyNumber ?: "911"})"
-                )
-            }
-
-            if (!contactPhoneNumber.isNullOrBlank()) {
-                Button(
-                    onClick = onCallContact,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(text = "Call ${contactName ?: "trusted contact"}")
+                alertMessage?.takeIf { it.isNotBlank() }?.let { body ->
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
                 }
-            }
+                Text(
+                    text = "Aasa will not call anyone automatically. You must confirm in the dialer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
 
-            Row(modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onOpenEmergencyDialer,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text(
+                        text = "Open Emergency Dialer (${emergencyNumber ?: "911"})"
+                    )
+                }
+
+                if (!contactPhoneNumber.isNullOrBlank()) {
+                    Button(
+                        onClick = onCallContact,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(text = "Call ${contactName ?: "trusted contact"}")
+                    }
+                }
+
                 OutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth()

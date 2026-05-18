@@ -8,7 +8,7 @@ import com.aasa.eldercare.data.entity.TrustedRelationshipTypes
 
 /**
  * Seeds the database with the minimum data demos rely on:
- *  - a "BP tablet" medication
+ *  - a "Metformin" medication for a diabetes care routine
  *  - "Priya" as the primary trusted contact
  *  - one favorite-music memory
  *
@@ -16,7 +16,8 @@ import com.aasa.eldercare.data.entity.TrustedRelationshipTypes
  */
 object DemoDataSeeder {
 
-    private const val DEMO_MEDICATION_NAME = "BP tablet"
+    private const val DEMO_MEDICATION_NAME = "Metformin"
+    private const val LEGACY_DEMO_MEDICATION_NAME = "BP tablet"
     private const val DEMO_CONTACT_NAME = "Priya"
     private const val DEMO_NEIGHBOR_HELPER_NAME = "Mrs Wong"
     private const val MEMORY_TYPE_FAVORITE_MUSIC = "FAVORITE_MUSIC"
@@ -38,11 +39,12 @@ object DemoDataSeeder {
 
     private suspend fun seedMedication(database: AppDatabase) {
         val dao = database.medicationDao()
+        dao.deleteMedicationByName(LEGACY_DEMO_MEDICATION_NAME.lowercase())
         if (dao.findMedicationByName(DEMO_MEDICATION_NAME.lowercase()) != null) return
         dao.insertMedication(
             MedicationEntity(
                 name = DEMO_MEDICATION_NAME,
-                dosage = "1 tablet",
+                dosage = "500 mg tablet",
                 scheduleTime = "08:00 AM"
             )
         )

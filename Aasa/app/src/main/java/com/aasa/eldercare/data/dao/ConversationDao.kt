@@ -15,6 +15,9 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY createdAt DESC LIMIT :limit")
     fun getRecentConversations(limit: Int): Flow<List<ConversationEntity>>
 
+    @Query("SELECT * FROM conversations ORDER BY createdAt DESC LIMIT :limit")
+    suspend fun getRecentConversationSnapshot(limit: Int): List<ConversationEntity>
+
     @Query(
         "SELECT EXISTS(" +
             "SELECT 1 FROM conversations " +

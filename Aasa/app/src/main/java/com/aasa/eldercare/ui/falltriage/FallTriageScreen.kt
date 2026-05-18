@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +37,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aasa.eldercare.AasaApplication
@@ -73,11 +79,45 @@ fun FallTriageScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var pendingAutoSms by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted -> viewModel.onMicPermissionResult(granted) }
     )
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            val pending = pendingAutoSms
+            pendingAutoSms = null
+            if (granted && pending != null) {
+                IntentActionLauncher.sendSmsDirect(context, pending.first, pending.second)
+            } else if (pending != null) {
+                IntentActionLauncher.openSms(context, pending.first, pending.second)
+            }
+        }
+    )
+
+    fun hasSmsPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.SEND_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+
+    fun requestSmsPermissionIfNeeded() {
+        if (!hasSmsPermission()) {
+            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+        }
+    }
+
+    fun sendSmsDirectOrRequest(number: String, body: String) {
+        if (hasSmsPermission()) {
+            IntentActionLauncher.sendSmsDirect(context, number, body)
+        } else {
+            pendingAutoSms = number to body
+            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+        }
+    }
 
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(
@@ -106,6 +146,7 @@ fun FallTriageScreen(
             innerPadding = innerPadding,
             uiState = uiState,
             onStartMonitoring = {
+                requestSmsPermissionIfNeeded()
                 if (uiState.hasMicPermission) {
                     viewModel.startMonitoring()
                 } else {
@@ -115,6 +156,7 @@ fun FallTriageScreen(
             },
             onStopMonitoring = viewModel::stopMonitoring,
             onSimulateFall = {
+                requestSmsPermissionIfNeeded()
                 if (!uiState.hasMicPermission) {
                     permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -127,6 +169,9 @@ fun FallTriageScreen(
             },
             onOpenSms = { number, body ->
                 IntentActionLauncher.openSms(context, number, body)
+            },
+            onSendSmsDirect = { number, body ->
+                sendSmsDirectOrRequest(number, body)
             },
             onOpenEmergencyDialer = { number ->
                 IntentActionLauncher.openDialer(context, number)
@@ -152,8 +197,52 @@ private fun FallTriageContent(
     onDismissError: () -> Unit,
     onCallContact: (String) -> Unit,
     onOpenSms: (String, String) -> Unit,
+    onSendSmsDirect: (String, String) -> Unit,
     onOpenEmergencyDialer: (String) -> Unit
 ) {
+    if (uiState.showTriageCard &&
+        uiState.triageCategory == FallTriageCategories.URGENT_RISK
+    ) {
+        UrgentTriageDialog(
+            contactName = uiState.contactName,
+            phoneNumber = uiState.phoneNumber,
+            emergencyNumber = uiState.emergencyNumber ?: "911",
+            alertMessage = uiState.alertMessage.orEmpty(),
+            onOpenEmergencyDialer = { number ->
+                onOpenEmergencyDialer(number)
+                onReset()
+            },
+            onCallContact = { number ->
+                onCallContact(number)
+                onReset()
+            },
+            onOpenSms = { number, body ->
+                onOpenSms(number, body)
+                onReset()
+            },
+            onDismiss = onReset
+        )
+    }
+    if (uiState.showTriageCard &&
+        uiState.triageCategory == FallTriageCategories.NO_RESPONSE
+    ) {
+        NoResponseEscalationDialog(
+            contactName = uiState.contactName,
+            phoneNumber = uiState.phoneNumber,
+            emergencyNumber = uiState.emergencyNumber ?: "911",
+            alertMessage = uiState.alertMessage.orEmpty(),
+            onAlertContact = { number, body ->
+                onSendSmsDirect(number, body)
+                onReset()
+            },
+            onOpenEmergencyDialer = { number ->
+                onOpenEmergencyDialer(number)
+                onReset()
+            },
+            onImOkay = onReset
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -642,49 +731,17 @@ private fun TriageActionButtons(
     onOpenEmergencyDialer: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val hasContact = !contactName.isNullOrBlank() && !phoneNumber.isNullOrBlank()
+    val contactPhoneNumber = phoneNumber?.takeIf { it.isNotBlank() }
+    val hasContact = !contactName.isNullOrBlank() && contactPhoneNumber != null
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         when (category) {
-            FallTriageCategories.URGENT_RISK -> {
-                Button(
-                    onClick = { onOpenEmergencyDialer(emergencyNumber) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                ) {
-                    Text(
-                        text = "Open Emergency Dialer",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                if (hasContact) {
-                    OutlinedButton(
-                        onClick = { phoneNumber?.let(onCallContact) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                    ) {
-                        Text(text = "Call $contactName", fontSize = 16.sp)
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            phoneNumber?.let { onOpenSms(it, alertMessage) }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                    ) {
-                        Text(text = "Open SMS to $contactName", fontSize = 16.sp)
-                    }
-                }
-            }
+            FallTriageCategories.URGENT_RISK -> Unit
             FallTriageCategories.NON_EMERGENCY_INJURY -> {
                 if (hasContact) {
                     Button(
                         onClick = {
-                            phoneNumber?.let { onOpenSms(it, alertMessage) }
+                            onOpenSms(contactPhoneNumber, alertMessage)
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -697,7 +754,7 @@ private fun TriageActionButtons(
                         )
                     }
                     OutlinedButton(
-                        onClick = { phoneNumber?.let(onCallContact) },
+                        onClick = { onCallContact(contactPhoneNumber) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp)
@@ -707,30 +764,7 @@ private fun TriageActionButtons(
                 }
             }
             FallTriageCategories.NO_RESPONSE -> {
-                if (hasContact) {
-                    Button(
-                        onClick = {
-                            phoneNumber?.let { onOpenSms(it, alertMessage) }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp)
-                    ) {
-                        Text(
-                            text = "Alert $contactName by SMS",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-                OutlinedButton(
-                    onClick = { onOpenEmergencyDialer(emergencyNumber) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                ) {
-                    Text(text = "Open Emergency Dialer", fontSize = 16.sp)
-                }
+                Unit
             }
             FallTriageCategories.FALSE_ALARM -> Unit
         }
@@ -745,6 +779,222 @@ private fun TriageActionButtons(
         }
     }
 }
+
+@Composable
+private fun NoResponseEscalationDialog(
+    contactName: String?,
+    phoneNumber: String?,
+    emergencyNumber: String,
+    alertMessage: String,
+    onAlertContact: (String, String) -> Unit,
+    onOpenEmergencyDialer: (String) -> Unit,
+    onImOkay: () -> Unit
+) {
+    val contactPhoneNumber = phoneNumber?.takeIf { it.isNotBlank() }
+    val hasContact = !contactName.isNullOrBlank() && contactPhoneNumber != null
+    var secondsRemaining by remember { mutableIntStateOf(NO_RESPONSE_ESCALATION_SECONDS) }
+
+    LaunchedEffect(contactPhoneNumber, alertMessage) {
+        secondsRemaining = NO_RESPONSE_ESCALATION_SECONDS
+        while (secondsRemaining > 0) {
+            kotlinx.coroutines.delay(1_000L)
+            secondsRemaining -= 1
+        }
+        if (contactPhoneNumber != null) {
+            onAlertContact(contactPhoneNumber, alertMessage)
+        } else {
+            onOpenEmergencyDialer(emergencyNumber)
+        }
+    }
+
+    Dialog(onDismissRequest = { }) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "No Response Heard",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = if (hasContact) {
+                        "Aasa will alert $contactName in $secondsRemaining seconds unless you say you are okay."
+                    } else {
+                        "Aasa will open the emergency dialer in $secondsRemaining seconds unless you say you are okay."
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                alertMessage.takeIf { it.isNotBlank() }?.let { body ->
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+                Text(
+                    text = "Aasa can send the SMS automatically when SMS permission is granted.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+
+                if (hasContact) {
+                    Button(
+                        onClick = { onAlertContact(contactPhoneNumber, alertMessage) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        )
+                    ) {
+                        Text(
+                            text = "Alert $contactName Now",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = { onOpenEmergencyDialer(emergencyNumber) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                ) {
+                    Text(text = "Open Emergency Dialer", fontSize = 16.sp)
+                }
+
+                OutlinedButton(
+                    onClick = onImOkay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Text(text = "I'm Okay", fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UrgentTriageDialog(
+    contactName: String?,
+    phoneNumber: String?,
+    emergencyNumber: String,
+    alertMessage: String,
+    onOpenEmergencyDialer: (String) -> Unit,
+    onCallContact: (String) -> Unit,
+    onOpenSms: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val contactPhoneNumber = phoneNumber?.takeIf { it.isNotBlank() }
+    val hasContact = !contactName.isNullOrBlank() && contactPhoneNumber != null
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Urgent Safety Concern",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = "This may need urgent help. You can open the emergency dialer or call ${contactName ?: "your trusted contact"}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                alertMessage.takeIf { it.isNotBlank() }?.let { body ->
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+                Text(
+                    text = "Aasa will not call anyone automatically. You must confirm in the dialer or message app.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+
+                Button(
+                    onClick = { onOpenEmergencyDialer(emergencyNumber) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text(
+                        text = "Open Emergency Dialer",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                if (hasContact) {
+                    Button(
+                        onClick = { onCallContact(contactPhoneNumber) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    ) {
+                        Text(text = "Call $contactName", fontSize = 16.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            onOpenSms(contactPhoneNumber, alertMessage)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    ) {
+                        Text(text = "Open SMS to $contactName", fontSize = 16.sp)
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Text(text = "Dismiss", fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+private const val NO_RESPONSE_ESCALATION_SECONDS = 10
 
 @Composable
 private fun DisclaimerCard() {

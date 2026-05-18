@@ -81,11 +81,13 @@ class SpeechToTextManager(
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                 )
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, language.toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language.toLanguageTag())
                 putExtra(
                     RecognizerIntent.EXTRA_CALLING_PACKAGE,
                     context.packageName
                 )
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
                 putExtra(
                     RecognizerIntent.EXTRA_MAX_RESULTS,
                     1

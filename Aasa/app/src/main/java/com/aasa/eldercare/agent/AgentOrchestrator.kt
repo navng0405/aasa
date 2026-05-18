@@ -1,6 +1,7 @@
 package com.aasa.eldercare.agent
 
 import com.aasa.eldercare.data.repository.ConversationRepository
+import com.aasa.eldercare.data.entity.ConversationEntity
 import com.aasa.eldercare.model.ModelRunner
 import com.aasa.eldercare.tools.FallTriageKeywords
 import com.aasa.eldercare.tools.IntentKeywords
@@ -43,9 +44,16 @@ class AgentOrchestrator(
 ) {
 
     suspend fun handleUserMessage(message: String): AgentExecutionResult {
+        val recentContext = conversationRepository
+            .getRecentSnapshot(limit = SHORT_CONTEXT_TURN_LIMIT)
+            .toRecentContextBlock()
+
         conversationRepository.saveUserMessage(message)
 
-        val rawResponse = modelRunner.sendMessage(message)
+        val rawResponse = modelRunner.sendMessage(
+            message = message,
+            recentContext = recentContext
+        )
         val parsedAction = rawResponse.toAgentAction()
         val safeAction = applyDeterministicOverrides(message, parsedAction)
         val toolResult = toolRegistry.execute(safeAction)
@@ -63,6 +71,22 @@ class AgentOrchestrator(
         )
 
         return AgentExecutionResult(action = finalAction, toolResult = toolResult)
+    }
+
+    private fun List<ConversationEntity>.toRecentContextBlock(): String {
+        return asReversed()
+            .filter { it.message.isNotBlank() }
+            .joinToString(separator = "\n") { row ->
+                val role = when (row.role) {
+                    ConversationEntity.ROLE_USER -> "User"
+                    ConversationEntity.ROLE_ASSISTANT -> "Aasa"
+                    else -> row.role.lowercase().replaceFirstChar { it.uppercase() }
+                }
+                val message = row.message
+                    .replace(Regex("\\s+"), " ")
+                    .take(MAX_CONTEXT_MESSAGE_CHARS)
+                "$role: $message"
+            }
     }
 
     /**
@@ -193,7 +217,17 @@ class AgentOrchestrator(
                 arguments = enrichedArgs
             )
 
-            // --- 3. Memory save override --------------------------------
+            // --- 3. Memory recall / save overrides ----------------------
+            IntentKeywords.isMemoryRecallQuery(userMessage) -> action.copy(
+                intent = INTENT_RECALL_MEMORY,
+                tool = ToolNames.MEMORY,
+                riskLevel = action.riskLevel.ifBlank { RISK_LOW },
+                assistantResponse = action.assistantResponse
+                    .ifBlank { OVERRIDE_MEMORY_RECALL_RESPONSE },
+                arguments = enrichedArgs + mapOf(
+                    "memoryType" to IntentKeywords.deriveMemoryType(userMessage)
+                )
+            )
             IntentKeywords.isMemorySaveStatement(userMessage) -> action.copy(
                 intent = INTENT_SAVE_MEMORY,
                 tool = ToolNames.MEMORY,
@@ -218,6 +252,7 @@ class AgentOrchestrator(
         private const val INTENT_CHECK_MEDICATION = "CHECK_MEDICATION"
         private const val INTENT_LOG_MEDICATION = "LOG_MEDICATION"
         private const val INTENT_SAVE_MEMORY = "SAVE_MEMORY"
+        private const val INTENT_RECALL_MEMORY = "RECALL_MEMORY"
         private const val INTENT_ANALYZE_SCAM = "ANALYZE_SCAM"
         private const val INTENT_FALL_TRIAGE = "FALL_TRIAGE"
         private const val INTENT_MOBILITY_CHECK = "MOBILITY_CHECK"
@@ -227,6 +262,8 @@ class AgentOrchestrator(
         private const val RISK_HIGH = "HIGH"
         private const val RISK_MEDIUM = "MEDIUM"
         private const val RISK_LOW = "LOW"
+        private const val SHORT_CONTEXT_TURN_LIMIT = 8
+        private const val MAX_CONTEXT_MESSAGE_CHARS = 320
 
         // Replaces Gemma's chatty clarification ("please tell me which
         // medicine ...") for clearly-a-check queries. The actual answer
@@ -237,5 +274,7 @@ class AgentOrchestrator(
         // Used only when Gemma also left the assistant response blank.
         private const val OVERRIDE_MEMORY_RESPONSE =
             "Saved that to your memories."
+        private const val OVERRIDE_MEMORY_RECALL_RESPONSE =
+            "Let me check your saved memories."
     }
 }

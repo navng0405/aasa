@@ -7,7 +7,7 @@ package com.aasa.eldercare.tools
  * Rules are intentionally simple substring matches on a lowercased view
  * of the message. Substrings are easier to reason about than regex word
  * boundaries and don't silently miss obvious phrasings like
- * `"did I take BP tablet"` (no `today`, no `my`).
+ * `"did I take Metformin"` (no `today`, no `my`).
  *
  * Safety phrasing lives in [SafetyKeywords] – it is checked before
  * these rules and always wins.
@@ -37,6 +37,10 @@ object IntentKeywords {
         "capsule",
         "capsules",
         // Demo-specific shorthands the elder may use:
+        "metformin",
+        "diabetes medicine",
+        "diabetes tablet",
+        "diabetes pill",
         "bp tablet",
         "bp medicine",
         "bp pill"
@@ -123,6 +127,11 @@ object IntentKeywords {
         "birthday on",
         "birthday was",
         "birthday falls on",
+        // Common voice/typing misspelling of "birthday".
+        "bithday is",
+        "bithday on",
+        "bithday was",
+        "bithday falls on",
         "anniversary is",
         "anniversary on",
         "anniversary was",
@@ -135,12 +144,25 @@ object IntentKeywords {
         "my favourite"
     )
 
+    private val MEMORY_RECALL_TRIGGERS: List<String> = listOf(
+        "when is",
+        "what is",
+        "what's",
+        "whats",
+        "do you remember",
+        "did i tell you",
+        "what did i tell you",
+        "can you remind me",
+        "remind me"
+    )
+
     /**
      * Map of memory triggers to a coarse memory `type`. Used by
      * [deriveMemoryType] when Gemma didn't classify the memory itself.
      */
     private val MEMORY_TYPE_HINTS: List<Pair<String, String>> = listOf(
         "birthday" to "BIRTHDAY",
+        "bithday" to "BIRTHDAY",
         "anniversary" to "ANNIVERSARY",
         "wedding" to "WEDDING",
         "favorite music" to "FAVORITE_MUSIC",
@@ -154,6 +176,18 @@ object IntentKeywords {
     fun isMemorySaveStatement(text: String): Boolean {
         val lower = text.lowercase()
         return MEMORY_SAVE_TRIGGERS.any { lower.contains(it) }
+    }
+
+    fun isMemoryRecallQuery(text: String): Boolean {
+        val lower = text.lowercase()
+        val hasMemorySubject = MEMORY_TYPE_HINTS.any { lower.contains(it.first) } ||
+            lower.contains("memory") ||
+            lower.contains("remember")
+        if (!hasMemorySubject) return false
+
+        val hasQuestionShape = MEMORY_RECALL_TRIGGERS.any { lower.contains(it) } ||
+            lower.endsWith("?")
+        return hasQuestionShape
     }
 
     // ----------------------------------------------------------------

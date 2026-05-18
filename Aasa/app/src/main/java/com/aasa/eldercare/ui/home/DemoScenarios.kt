@@ -17,12 +17,27 @@ object DemoScenarios {
         DemoScenario(
             id = "medication",
             label = "Medication",
-            message = "I took my BP tablet."
+            message = "I took my Metformin."
         ),
         DemoScenario(
             id = "memory",
             label = "Memory",
             message = "My granddaughter Ananya's birthday is May 12."
+        ),
+        DemoScenario(
+            id = "memory_second",
+            label = "Memory 2",
+            message = "My granddaugters bithday is on June 10."
+        ),
+        DemoScenario(
+            id = "memory_recall",
+            label = "Recall",
+            message = "When is my granddaughter birthday?"
+        ),
+        DemoScenario(
+            id = "companion",
+            label = "Companion",
+            message = "I feel lonely this evening and miss my family."
         ),
         DemoScenario(
             id = "safety",

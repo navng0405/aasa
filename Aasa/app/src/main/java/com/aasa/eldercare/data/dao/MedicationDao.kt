@@ -23,6 +23,9 @@ interface MedicationDao {
     @Query("SELECT * FROM medications WHERE nameLower = :nameLower LIMIT 1")
     suspend fun findMedicationByName(nameLower: String): MedicationEntity?
 
+    @Query("DELETE FROM medications WHERE nameLower = :nameLower")
+    suspend fun deleteMedicationByName(nameLower: String): Int
+
     @Query("SELECT * FROM medications ORDER BY createdAt ASC")
     fun getAllMedications(): Flow<List<MedicationEntity>>
 
@@ -53,7 +56,7 @@ interface MedicationDao {
 
     /**
      * JOIN helper used by `CHECK_MEDICATION` so the tool can render a
-     * readable summary like `"BP tablet -> taken"`.
+     * readable summary like `"Metformin -> taken"`.
      */
     @Query(
         """

@@ -87,7 +87,10 @@ class OnDeviceGemmaRunner(
         engine != null
     }
 
-    override suspend fun sendMessage(message: String): AgentMessageResponse =
+    override suspend fun sendMessage(
+        message: String,
+        recentContext: String
+    ): AgentMessageResponse =
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 val convo = conversation
@@ -95,7 +98,10 @@ class OnDeviceGemmaRunner(
                         "OnDeviceGemmaRunner.sendMessage called before isAvailable() succeeded"
                     )
 
-                val prompt = OnDevicePromptBuilder.build(message)
+                val prompt = OnDevicePromptBuilder.build(
+                    userMessage = message,
+                    recentContext = recentContext
+                )
 
                 val raw = StringBuilder()
                 convo.sendMessageAsync(prompt).collect { chunk ->

@@ -848,7 +848,15 @@ class HomeViewModel(
         } else {
             "Daily heartbeat timeout: wellness check timeout."
         }
-        val result = orchestrator.handleUserMessage(syntheticMessage)
+        val result = runCatching { orchestrator.handleUserMessage(syntheticMessage) }
+            .getOrElse { error ->
+                _uiState.value = _uiState.value.copy(
+                    gemmaConnection = GemmaConnectionState.DISCONNECTED,
+                    gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+                    gemmaStatusDetail = error.toReadableMessage()
+                )
+                return
+            }
         val smsBody = if (state == WellnessCheckTool.STATE_ESCALATED) {
             "Aasa wellness check: no heartbeat for $silenceHours hours. Please check in soon. $WELLNESS_DEEP_LINK"
         } else {
@@ -882,7 +890,15 @@ class HomeViewModel(
         morningWindow: PresencePingRepository.MorningWindow
     ) {
         val syntheticMessage = "Daily heartbeat timeout: neighbor check escalation."
-        val result = orchestrator.handleUserMessage(syntheticMessage)
+        val result = runCatching { orchestrator.handleUserMessage(syntheticMessage) }
+            .getOrElse { error ->
+                _uiState.value = _uiState.value.copy(
+                    gemmaConnection = GemmaConnectionState.DISCONNECTED,
+                    gemmaModelLabel = gemmaRouter.selectedRunnerLabel,
+                    gemmaStatusDetail = error.toReadableMessage()
+                )
+                return
+            }
         val helperName = (result.toolResult.data[ToolResultKeys.CONTACT_NAME] as? String).orEmpty()
         val recipientName = (result.toolResult.data[ToolResultKeys.PAIRED_CONTACT_NAME] as? String).orEmpty()
         val neighborSms = buildString {

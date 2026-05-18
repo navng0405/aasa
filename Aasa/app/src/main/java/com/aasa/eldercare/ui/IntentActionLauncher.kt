@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.telephony.SmsManager
 import android.util.Log
 import android.widget.Toast
 
@@ -70,6 +71,42 @@ object IntentActionLauncher {
         } catch (e: ActivityNotFoundException) {
             Log.w(TAG, "No SMS app found for $cleaned", e)
             toast(context, "No messaging app found on this device.")
+        }
+    }
+
+    /**
+     * Send [body] directly to [phoneNumber]. Callers must hold
+     * `android.permission.SEND_SMS` before invoking this.
+     */
+    @Suppress("DEPRECATION")
+    fun sendSmsDirect(context: Context, phoneNumber: String, body: String): Boolean {
+        val cleaned = phoneNumber.trim()
+        if (cleaned.isBlank()) {
+            toast(context, "No phone number available.")
+            return false
+        }
+        return try {
+            val smsManager = SmsManager.getDefault()
+            val parts = smsManager.divideMessage(body)
+            if (parts.size > 1) {
+                smsManager.sendMultipartTextMessage(cleaned, null, parts, null, null)
+            } else {
+                smsManager.sendTextMessage(cleaned, null, body, null, null)
+            }
+            toast(context, "Emergency alert sent.")
+            true
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Missing SMS permission for $cleaned", e)
+            toast(context, "SMS permission is needed to send automatically.")
+            false
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Could not send SMS to $cleaned", e)
+            toast(context, "Could not send SMS. Check the phone number.")
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not send SMS to $cleaned", e)
+            toast(context, "Could not send SMS on this device.")
+            false
         }
     }
 

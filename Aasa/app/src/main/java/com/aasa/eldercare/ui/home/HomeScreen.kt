@@ -739,7 +739,7 @@ private fun ManualInputSection(
                 value = inputText,
                 onValueChange = onChange,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("e.g. I took my BP tablet.") },
+                placeholder = { Text("e.g. I took my Metformin.") },
                 enabled = !isLoading,
                 minLines = 2,
                 maxLines = 4,
@@ -1920,7 +1920,7 @@ private fun DemoDataControls(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Wipes medications, memories, contacts, and conversations from this phone, then re-seeds the BP tablet, Priya, and the favorite-music memory.",
+                text = "Wipes medications, memories, contacts, and conversations from this phone, then re-seeds Metformin, Priya, and the favorite-music memory.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

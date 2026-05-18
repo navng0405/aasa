@@ -30,5 +30,8 @@ interface ModelRunner {
      * Run one user turn through the model. Must return an [AgentMessageResponse]
      * shaped identically regardless of backend.
      */
-    suspend fun sendMessage(message: String): AgentMessageResponse
+    suspend fun sendMessage(
+        message: String,
+        recentContext: String = ""
+    ): AgentMessageResponse
 }

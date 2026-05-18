@@ -66,10 +66,17 @@ class GemmaRouter(
         }
     }
 
-    override suspend fun sendMessage(message: String): AgentMessageResponse {
+    override suspend fun sendMessage(
+        message: String,
+        recentContext: String
+    ): AgentMessageResponse {
         // 1) Forced bridge — useful for A/B during the demo.
         if (forceBridge) {
-            return runBridge(message, reasonPrefix = "Force-bridge toggle ON")
+            return runBridge(
+                message,
+                recentContext,
+                reasonPrefix = "Force-bridge toggle ON"
+            )
         }
 
         // 2) On-device preferred.
@@ -82,7 +89,7 @@ class GemmaRouter(
 
         if (onDeviceOk) {
             try {
-                val resp = onDevice.sendMessage(message)
+                val resp = onDevice.sendMessage(message, recentContext)
                 _activeRunnerLabel.value = onDevice.label
                 _lastRoutingReason.value =
                     "On-device Gemma 4 served this turn (LiteRT-LM)."
@@ -99,6 +106,7 @@ class GemmaRouter(
                 }
                 return runBridge(
                     message,
+                    recentContext,
                     reasonPrefix = "On-device failed (${t.javaClass.simpleName}); fell back to bridge"
                 )
             }
@@ -116,11 +124,16 @@ class GemmaRouter(
         // 3) Optional bridge fallback.
         return runBridge(
             message,
+            recentContext,
             reasonPrefix = "On-device unavailable (${onDevice.statusReason ?: "unknown"}); using bridge"
         )
     }
 
-    private suspend fun runBridge(message: String, reasonPrefix: String): AgentMessageResponse {
+    private suspend fun runBridge(
+        message: String,
+        recentContext: String,
+        reasonPrefix: String
+    ): AgentMessageResponse {
         val bridgeOk = try {
             bridge.isAvailable()
         } catch (_: Throwable) {
@@ -137,7 +150,7 @@ class GemmaRouter(
                 }
             )
         }
-        val resp = bridge.sendMessage(message)
+        val resp = bridge.sendMessage(message, recentContext)
         _activeRunnerLabel.value = bridge.label
         _lastRoutingReason.value = "$reasonPrefix."
         return resp

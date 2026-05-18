@@ -5,7 +5,11 @@ import com.google.gson.annotations.SerializedName
 
 data class AgentMessageRequest(
     @SerializedName("message")
-    val message: String
+    val message: String,
+    @SerializedName("recentContext")
+    val recentContext: String = "",
+    @SerializedName("deviceLocale")
+    val deviceLocale: String = ""
 )
 
 data class AgentMessageResponse(

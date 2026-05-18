@@ -3,6 +3,7 @@ package com.aasa.eldercare.model
 import com.aasa.eldercare.network.AgentMessageRequest
 import com.aasa.eldercare.network.AgentMessageResponse
 import com.aasa.eldercare.network.ApiService
+import java.util.Locale
 
 /**
  * Mac-side dev fallback. As of Phase 9 this is **not** the default path —
@@ -23,7 +24,16 @@ class RemoteLocalGemmaRunner(
         false
     }
 
-    override suspend fun sendMessage(message: String): AgentMessageResponse {
-        return apiService.sendMessage(AgentMessageRequest(message = message))
+    override suspend fun sendMessage(
+        message: String,
+        recentContext: String
+    ): AgentMessageResponse {
+        return apiService.sendMessage(
+            AgentMessageRequest(
+                message = message,
+                recentContext = recentContext,
+                deviceLocale = Locale.getDefault().toLanguageTag()
+            )
+        )
     }
 }

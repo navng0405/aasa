@@ -11,6 +11,9 @@ class ConversationRepository(
     fun getRecent(limit: Int = DEFAULT_RECENT_LIMIT): Flow<List<ConversationEntity>> =
         dao.getRecentConversations(limit)
 
+    suspend fun getRecentSnapshot(limit: Int = DEFAULT_RECENT_LIMIT): List<ConversationEntity> =
+        dao.getRecentConversationSnapshot(limit)
+
     suspend fun saveUserMessage(message: String): Long =
         dao.insertConversation(
             ConversationEntity(

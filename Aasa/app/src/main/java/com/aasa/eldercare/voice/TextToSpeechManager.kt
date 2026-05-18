@@ -127,6 +127,7 @@ class TextToSpeechManager(
         val preferred = Locale.getDefault()
         val applied = applyLocaleWithFallback(preferred)
         if (applied != null) {
+            configureWarmVoice(applied)
             isReady = true
             _status.value = null
             _events.tryEmit(TtsEvent.Ready)
@@ -135,6 +136,31 @@ class TextToSpeechManager(
             _status.value = "Voice playback language is not supported on this device."
             _events.tryEmit(TtsEvent.Error("Text-to-speech language not supported."))
         }
+    }
+
+    private fun configureWarmVoice(locale: Locale) {
+        runCatching {
+            val localVoice = tts.voices
+                ?.filter { voice ->
+                    !voice.isNetworkConnectionRequired &&
+                        voice.locale.language == locale.language
+                }
+                ?.maxWithOrNull(
+                    compareBy(
+                        { it.quality },
+                        { -it.latency }
+                    )
+                )
+            if (localVoice != null) {
+                tts.voice = localVoice
+            }
+        }.onFailure { t ->
+            Log.w(TAG, "voice selection failed", t)
+        }
+
+        // Aasa should sound calm and elder-friendly, not rushed or chirpy.
+        runCatching { tts.setSpeechRate(WARM_SPEECH_RATE) }
+        runCatching { tts.setPitch(WARM_PITCH) }
     }
 
     /**
@@ -161,5 +187,7 @@ class TextToSpeechManager(
 
     companion object {
         private const val TAG = "TextToSpeechManager"
+        private const val WARM_SPEECH_RATE = 0.88f
+        private const val WARM_PITCH = 0.96f
     }
 }
